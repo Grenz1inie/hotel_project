@@ -3,7 +3,7 @@
 # =========================
 cloudbeaver/
 minio/
-oracle/data
+oracle/oradata
 redis/
 
 # =========================

@@ -36,6 +36,12 @@ services:
       # 数据持久化：强制存到当前项目的 data 目录
       - ./oracle/oradata:/opt/oracle/oradata
       - ./oracle/init.sql:/opt/oracle/scripts/setup/init.sql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
 
   # Redis：缓存与会话加速组件
   redis:
@@ -99,14 +105,30 @@ services:
     ports:
       - "8080:8080"
 
+  # 前端服务（预生产可选）
+  # 说明：作为 compose 内独立服务运行；
+  #       仅在预生产场景手动启用，开发环境建议本地 npm start 以获得热更新。
+  frontend:
+    image: node:20-alpine
+    container_name: hotel-frontend
+    profiles: ["preprod"]
+    working_dir: /app
+    volumes:
+      - ./hotel-frontend:/app
+      - /app/node_modules
+    command: sh -c "npm ci --ignore-scripts && npm run build && npx -y serve -s build -l 3000"
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
   # Nginx：统一入口网关
-  # 说明：通过挂载配置文件实现前端与多后端路由聚合。
+  # 说明：统一入口网关；默认仅负责网关能力，
+  #       前端在预生产时由 frontend 服务单独承载。
   nginx:
     image: nginx:latest
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    #   target: nginx-runtime
     container_name: hotel-nginx
     # depends_on:
     #   - backend
@@ -127,9 +149,9 @@ services:
   cloudbeaver:
     image: dbeaver/cloudbeaver:latest
     container_name: hotel-cloudbeaver
-    # depends_on:
-    #   oracle:
-    #     condition: service_healthy
+    depends_on:
+      oracle:
+        condition: service_healthy
     ports:
       - "8081:8978"
     environment:

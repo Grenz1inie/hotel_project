@@ -9,10 +9,14 @@
 !Dockerfile
 !nginx/nginx.conf
 !hotel-frontend/**
+!hotel-backend/
+!hotel-backend/hotel-backend/
 !hotel-backend/hotel-backend/pom.xml
 !hotel-backend/hotel-backend/mvnw
 !hotel-backend/hotel-backend/mvnw.cmd
+!hotel-backend/hotel-backend/.mvn
 !hotel-backend/hotel-backend/.mvn/**
+!hotel-backend/hotel-backend/src
 !hotel-backend/hotel-backend/src/**
 
 # =========================
@@ -20,7 +24,7 @@
 # =========================
 cloudbeaver/
 minio/
-oracle/data/
+oracle/oradata/
 redis/
 
 # =========================
