@@ -1,0 +1,16 @@
+{
+	"folders": [
+        {
+            "name": "hotel_project",
+            "path": "."
+        },
+        {
+            "name": "hotel-frontend",
+            "path": "hotel-frontend"
+        },
+        {
+            "name": "hotel-backend",
+            "path": "hotel-backend/hotel-backend"
+        }
+    ]
+}

@@ -1,0 +1,122 @@
+# =========================
+# 根策略：最小化 Docker 构建上下文
+# =========================
+**
+
+# =========================
+# 镜像构建必须保留的文件/目录
+# =========================
+!Dockerfile
+!nginx/nginx.conf
+!hotel-frontend/**
+!hotel-backend/hotel-backend/pom.xml
+!hotel-backend/hotel-backend/mvnw
+!hotel-backend/hotel-backend/mvnw.cmd
+!hotel-backend/hotel-backend/.mvn/**
+!hotel-backend/hotel-backend/src/**
+
+# =========================
+# 中间件与数据库数据目录（显式标注，默认也会被 ** 排除）
+# =========================
+cloudbeaver/
+minio/
+oracle/data/
+redis/
+
+# =========================
+# 前端（hotel-frontend）依赖/缓存/构建产物
+# （已合并前端忽略规则）
+# =========================
+hotel-frontend/node_modules/
+hotel-frontend/.pnp
+hotel-frontend/.pnp.js
+hotel-frontend/coverage/
+hotel-frontend/build/
+hotel-frontend/dist/
+hotel-frontend/out/
+hotel-frontend/.cache/
+hotel-frontend/.eslintcache
+hotel-frontend/tmp/
+hotel-frontend/temp/
+
+# =========================
+# 前端环境文件/日志/编辑器缓存
+# =========================
+hotel-frontend/.env
+hotel-frontend/.env.*
+!hotel-frontend/.env.example
+hotel-frontend/logs/
+hotel-frontend/*.log
+hotel-frontend/build_*.log
+hotel-frontend/npm-debug.log*
+hotel-frontend/yarn-debug.log*
+hotel-frontend/yarn-error.log*
+hotel-frontend/pnpm-debug.log*
+hotel-frontend/lerna-debug.log*
+hotel-frontend/.vscode/
+hotel-frontend/.idea/
+hotel-frontend/*.swp
+hotel-frontend/*.swo
+hotel-frontend/*~
+hotel-frontend/.DS_Store
+hotel-frontend/Thumbs.db
+hotel-frontend/Desktop.ini
+
+# =========================
+# 后端（hotel-backend/hotel-backend）构建产物
+# （已合并后端忽略规则）
+# =========================
+hotel-backend/hotel-backend/target/
+hotel-backend/hotel-backend/build/
+hotel-backend/hotel-backend/maven-helper/
+hotel-backend/hotel-backend/.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# =========================
+# 后端环境文件/日志/运行时转储/IDE 缓存
+# =========================
+hotel-backend/hotel-backend/.env
+hotel-backend/hotel-backend/.env.*
+!hotel-backend/hotel-backend/.env.example
+hotel-backend/hotel-backend/logs/
+hotel-backend/hotel-backend/*.log
+hotel-backend/hotel-backend/*.out
+hotel-backend/hotel-backend/*.err
+hotel-backend/hotel-backend/*.pid
+hotel-backend/hotel-backend/*.seed
+hotel-backend/hotel-backend/*.stackdump
+hotel-backend/hotel-backend/*.hprof
+hotel-backend/hotel-backend/hs_err_pid*
+hotel-backend/hotel-backend/replay_pid*
+hotel-backend/hotel-backend/.apt_generated
+hotel-backend/hotel-backend/.classpath
+hotel-backend/hotel-backend/.factorypath
+hotel-backend/hotel-backend/.project
+hotel-backend/hotel-backend/.settings
+hotel-backend/hotel-backend/.springBeans
+hotel-backend/hotel-backend/.sts4-cache
+hotel-backend/hotel-backend/.idea
+hotel-backend/hotel-backend/*.iws
+hotel-backend/hotel-backend/*.iml
+hotel-backend/hotel-backend/*.ipr
+hotel-backend/hotel-backend/.vscode/
+hotel-backend/hotel-backend/nbproject/private/
+hotel-backend/hotel-backend/nbbuild/
+hotel-backend/hotel-backend/dist/
+hotel-backend/hotel-backend/nbdist/
+hotel-backend/hotel-backend/.nb-gradle/
+
+# =========================
+# 根目录版本控制元数据
+# =========================
+.git/
+.gitignore
+
+# =========================
+# 说明
+# 1) 由于使用了 "**" 默认排除策略，未被 ! 放行的目录（含中间件数据目录）均不会进入构建上下文。
+# 2) 以上规则用于减小构建上下文体积，并避免无关文件进入镜像构建过程。
+# =========================

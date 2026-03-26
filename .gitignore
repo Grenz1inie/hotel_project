@@ -1,0 +1,124 @@
+# =========================
+# 中间件与数据库数据目录（新增规则）
+# =========================
+cloudbeaver/
+minio/
+oracle/data
+redis/
+
+# =========================
+# 根目录版本控制元数据
+# =========================
+.git/
+
+# =========================
+# 前端（hotel-frontend）依赖目录
+# =========================
+hotel-frontend/node_modules/
+hotel-frontend/.pnp
+hotel-frontend/.pnp.js
+
+# =========================
+# 前端（hotel-frontend）构建与测试产物
+# =========================
+hotel-frontend/coverage/
+hotel-frontend/build/
+hotel-frontend/dist/
+hotel-frontend/out/
+hotel-frontend/.cache/
+hotel-frontend/.eslintcache
+hotel-frontend/tmp/
+hotel-frontend/temp/
+
+# =========================
+# 后端（hotel-backend/hotel-backend）构建产物
+# =========================
+hotel-backend/hotel-backend/target/
+hotel-backend/hotel-backend/build/
+hotel-backend/hotel-backend/maven-helper/
+hotel-backend/hotel-backend/HELP.md
+hotel-backend/hotel-backend/.mvn/wrapper/maven-wrapper.jar
+
+# 保留源码目录下可能存在的 target/build（与原规则保持一致）
+!**/src/main/**/target/
+!**/src/test/**/target/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# =========================
+# 环境变量文件
+# =========================
+.env
+.env.*
+!.env.example
+hotel-frontend/.env
+hotel-frontend/.env.*
+!hotel-frontend/.env.example
+hotel-backend/hotel-backend/.env
+hotel-backend/hotel-backend/.env.*
+!hotel-backend/hotel-backend/.env.example
+
+# =========================
+# 日志与运行时转储
+# =========================
+hotel-frontend/logs/
+hotel-frontend/*.log
+hotel-frontend/build_*.log
+hotel-frontend/npm-debug.log*
+hotel-frontend/yarn-debug.log*
+hotel-frontend/yarn-error.log*
+hotel-frontend/pnpm-debug.log*
+hotel-frontend/lerna-debug.log*
+hotel-backend/hotel-backend/logs/
+hotel-backend/hotel-backend/*.log
+hotel-backend/hotel-backend/*.out
+hotel-backend/hotel-backend/*.err
+hotel-backend/hotel-backend/*.pid
+hotel-backend/hotel-backend/*.seed
+hotel-backend/hotel-backend/*.stackdump
+hotel-backend/hotel-backend/*.hprof
+hotel-backend/hotel-backend/hs_err_pid*
+hotel-backend/hotel-backend/replay_pid*
+
+# =========================
+# IDE / 编辑器配置
+# =========================
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+*.swp
+*.swo
+*~
+
+# =========================
+# 操作系统与临时文件
+# =========================
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
+*.temp
+
+# =========================
+# Java IDE 与构建元数据（后端）
+# =========================
+hotel-backend/hotel-backend/.apt_generated
+hotel-backend/hotel-backend/.classpath
+hotel-backend/hotel-backend/.factorypath
+hotel-backend/hotel-backend/.project
+hotel-backend/hotel-backend/.settings
+hotel-backend/hotel-backend/.springBeans
+hotel-backend/hotel-backend/.sts4-cache
+hotel-backend/hotel-backend/nbproject/private/
+hotel-backend/hotel-backend/nbbuild/
+hotel-backend/hotel-backend/dist/
+hotel-backend/hotel-backend/nbdist/
+hotel-backend/hotel-backend/.nb-gradle/
+
+# =========================
+# 说明
+# 1) 本文件为根仓库统一规则，已合并前后端原有忽略项。
+# 2) 当前已按你的新增规则忽略中间件/数据库数据目录。
+# =========================

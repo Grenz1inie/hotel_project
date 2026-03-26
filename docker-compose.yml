@@ -1,0 +1,165 @@
+name: hotel_project
+
+# --------------------------------------------------
+# 酒店项目本地开发编排
+# 说明：本文件按“基础中间件、应用服务、运维工具”进行分类，
+#       便于分批启动、故障定位与端口管理。
+# --------------------------------------------------
+services:
+  # ==================================================
+  # 一、基础中间件层
+  # ==================================================
+
+  # Oracle 11g XE：核心业务数据库
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    container_name: hotel-oracle
+    restart: always
+    # 强制限制容器物理内存，防止 Java 后端 + Oracle 把 16GB 撑爆
+    mem_limit: 4G 
+    shm_size: '2gb' 
+    ports:
+      - "1522:1521"
+    environment:
+      # --- 身份与安全强制指定 ---
+      # - ORACLE_PDB=hotelpdb
+      - ORACLE_PASSWORD=Hotel_PWD
+      
+      # --- 语言与环境强制指定 ---
+      - ORACLE_CHARACTERSET=AL32UTF8
+      - TZ=Asia/Shanghai
+      
+      # --- 自动创建用户 (部分镜像支持，若不支持需启动后手动执行) ---
+      # 注：23ai 官方镜像主要通过 SQL 脚本初始化，
+      # 你可以将建表/建用户脚本放在 ./data/oracle/scripts 下挂载到 /opt/oracle/scripts/setup
+    volumes:
+      # 数据持久化：强制存到当前项目的 data 目录
+      - ./oracle/oradata:/opt/oracle/oradata
+      - ./oracle/init.sql:/opt/oracle/scripts/setup/init.sql
+
+  # Redis：缓存与会话加速组件
+  redis:
+    image: redis:latest
+    container_name: hotel-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis/data:/data
+
+  # MinIO：对象存储服务（文件与图片）
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: hotel-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./minio/data:/data
+
+  # ==================================================
+  # 二、应用服务层
+  # ==================================================
+
+  # Spring Boot 后端服务
+  # 说明：依赖数据库、缓存、对象存储与 Nacos，统一暴露 8080。
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-runtime
+    container_name: hotel-backend
+    environment:
+      DB_HOST: oracle
+      DB_PORT: 1521
+      DB_SERVICE: XE
+      DB_USERNAME: ${ORACLE_APP_USER:-hotel_user}
+      DB_PASSWORD: ${ORACLE_APP_USER_PASSWORD:-hotel_pass}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-hotel-files}
+      NACOS_SERVER_ADDR: nacos:8848
+      SPRING_CLOUD_NACOS_SERVER_ADDR: nacos:8848
+    depends_on:
+      oracle:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      nacos:
+        condition: service_started
+    ports:
+      - "8080:8080"
+
+  # Nginx：统一入口网关
+  # 说明：通过挂载配置文件实现前端与多后端路由聚合。
+  nginx:
+    image: nginx:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   target: nginx-runtime
+    container_name: hotel-nginx
+    # depends_on:
+    #   - backend
+    #   - minio
+    #   - cloudbeaver
+    #   - nacos
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+    restart: always
+
+  # ==================================================
+  # 三、运维与辅助工具层
+  # ==================================================
+
+  # CloudBeaver：数据库图形化管理工具
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:latest
+    container_name: hotel-cloudbeaver
+    # depends_on:
+    #   oracle:
+    #     condition: service_healthy
+    ports:
+      - "8081:8978"
+    environment:
+      # 1. 默认语言设置为中文
+      - CLOUDBEAVER_CORE_LOCALIZATION=zh
+      # 2. 初始管理员用户名 (必填)
+      - CB_ADMIN_NAME=admin
+      # 3. 初始管理员密码 (必填)
+      - CB_ADMIN_PASSWORD=admin_password
+      # 4. 服务器显示名称 (必填！缺少此项将导致无法跳过初始向导)
+      - CB_SERVER_NAME=CloudBeaverServer
+    volumes:
+      - ./cloudbeaver/logs:/opt/cloudbeaver/logs
+      - ./cloudbeaver/workspace:/opt/cloudbeaver/workspace
+
+  # Nacos：服务发现与配置中心
+  nacos:
+    image: nacos/nacos-server:v3.0.3
+    container_name: hotel-nacos
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      NACOS_AUTH_ENABLE: "false"
+      NACOS_AUTH_TOKEN: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+      NACOS_AUTH_IDENTITY_KEY: "serverIdentity"
+      NACOS_AUTH_IDENTITY_VALUE: "security"
+    ports:
+      # 说明：当前仅保留 gRPC 端口对外映射。
+      # 如需直连 API 或控制台，可按需开放 8848/8080 映射。
+      # - "8848:8848"
+      # - "8082:8080"
+      - "9848:9848"
+
