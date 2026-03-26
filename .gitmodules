@@ -1,0 +1,6 @@
+[submodule "hotel-frontend"]
+	path = hotel-frontend
+	url = https://github.com/Grenz1inie/hotel-frontend.git
+[submodule "hotel-backend/hotel-backend"]
+	path = hotel-backend/hotel-backend
+	url = https://github.com/Grenz1inie/hotel-backend.git
