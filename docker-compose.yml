@@ -1,41 +1,39 @@
 name: hotel_project
 
-# --------------------------------------------------
+# ------------------------------------------------------------
 # 酒店项目本地开发编排
-# 说明：本文件按“基础中间件、应用服务、运维工具”进行分类，
-#       便于分批启动、故障定位与端口管理。
-# --------------------------------------------------
+# 结构说明：
+# 1) 基础中间件层：数据库、缓存、对象存储、配置中心
+# 2) 应用服务层：后端应用、前端构建服务、统一网关
+# 3) 运维工具层：数据库可视化管理组件
+# ------------------------------------------------------------
 services:
-  # ==================================================
+  # ============================================================
   # 一、基础中间件层
-  # ==================================================
+  # 说明：承载核心数据、缓存、对象存储与服务配置能力。
+  # ============================================================
 
-  # Oracle 11g XE：核心业务数据库
+  # Oracle：核心业务数据库服务
   oracle:
     image: gvenzl/oracle-free:23-slim
     container_name: hotel-oracle
     restart: always
-    # 强制限制容器物理内存，防止 Java 后端 + Oracle 把 16GB 撑爆
-    mem_limit: 4G 
-    shm_size: '2gb' 
     ports:
       - "1522:1521"
     environment:
-      # --- 身份与安全强制指定 ---
+      # 身份与认证参数。
       # - ORACLE_PDB=hotelpdb
       - ORACLE_PASSWORD=Hotel_PWD
-      
-      # --- 语言与环境强制指定 ---
+
+      # 字符集与时区参数。
       - ORACLE_CHARACTERSET=AL32UTF8
       - TZ=Asia/Shanghai
-      
-      # --- 自动创建用户 (部分镜像支持，若不支持需启动后手动执行) ---
-      # 注：23ai 官方镜像主要通过 SQL 脚本初始化，
-      # 你可以将建表/建用户脚本放在 ./data/oracle/scripts 下挂载到 /opt/oracle/scripts/setup
+
+      # 用户初始化通常通过挂载 SQL 脚本实现。
     volumes:
-      # 数据持久化：强制存到当前项目的 data 目录
+      # 数据卷：持久化数据库文件与初始化脚本。
       - ./oracle/oradata:/opt/oracle/oradata
-      - ./oracle/init.sql:/opt/oracle/scripts/setup/init.sql
+      # - ./oracle/init.sql:/opt/oracle/scripts/setup/init.sql
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
       interval: 30s
@@ -43,7 +41,7 @@ services:
       retries: 10
       start_period: 120s
 
-  # Redis：缓存与会话加速组件
+  # Redis：缓存与会话存储服务
   redis:
     image: redis:latest
     container_name: hotel-redis
@@ -53,7 +51,7 @@ services:
     volumes:
       - ./redis/data:/data
 
-  # MinIO：对象存储服务（文件与图片）
+  # MinIO：对象存储服务
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: hotel-minio
@@ -67,12 +65,31 @@ services:
     volumes:
       - ./minio/data:/data
 
-  # ==================================================
+  # Nacos：服务注册与配置中心
+  nacos:
+    image: nacos/nacos-server:v3.0.3
+    container_name: hotel-nacos
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      NACOS_AUTH_ENABLE: "false"
+      NACOS_AUTH_TOKEN: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+      NACOS_AUTH_IDENTITY_KEY: "serverIdentity"
+      NACOS_AUTH_IDENTITY_VALUE: "security"
+    ports:
+      # 端口策略：默认仅暴露 gRPC 通信端口。
+      # 如需访问控制台或 HTTP API，可按需启用 8848/8080 映射。
+      # - "8848:8848"
+      # - "8082:8080"
+      - "9848:9848"
+
+  # ============================================================
   # 二、应用服务层
-  # ==================================================
+  # 说明：承载业务接口、页面资源与统一入口代理。
+  # ============================================================
 
   # Spring Boot 后端服务
-  # 说明：依赖数据库、缓存、对象存储与 Nacos，统一暴露 8080。
+  # 说明：依赖数据库、缓存、对象存储与配置中心。
   backend:
     build:
       context: .
@@ -105,9 +122,8 @@ services:
     ports:
       - "8080:8080"
 
-  # 前端服务（预生产可选）
-  # 说明：作为 compose 内独立服务运行；
-  #       仅在预生产场景手动启用，开发环境建议本地 npm start 以获得热更新。
+  # 前端服务（预生产配置）
+  # 说明：用于预生产构建与静态资源托管，开发环境建议本地热更新。
   frontend:
     image: node:20-alpine
     container_name: hotel-frontend
@@ -125,8 +141,7 @@ services:
     restart: unless-stopped
 
   # Nginx：统一入口网关
-  # 说明：统一入口网关；默认仅负责网关能力，
-  #       前端在预生产时由 frontend 服务单独承载。
+  # 说明：提供统一反向代理入口，前端静态站点由独立服务承载。
   nginx:
     image: nginx:latest
     container_name: hotel-nginx
@@ -141,9 +156,10 @@ services:
       - "80:80"
     restart: always
 
-  # ==================================================
+  # ============================================================
   # 三、运维与辅助工具层
-  # ==================================================
+  # 说明：提供数据库可视化与运行维护辅助能力。
+  # ============================================================
 
   # CloudBeaver：数据库图形化管理工具
   cloudbeaver:
@@ -155,33 +171,13 @@ services:
     ports:
       - "8081:8978"
     environment:
-      # 1. 默认语言设置为中文
+      # 语言与初始化管理员配置。
       - CLOUDBEAVER_CORE_LOCALIZATION=zh
-      # 2. 初始管理员用户名 (必填)
       - CB_ADMIN_NAME=admin
-      # 3. 初始管理员密码 (必填)
       - CB_ADMIN_PASSWORD=admin_password
-      # 4. 服务器显示名称 (必填！缺少此项将导致无法跳过初始向导)
+      # 服务器显示名称用于完成首次初始化流程。
       - CB_SERVER_NAME=CloudBeaverServer
     volumes:
       - ./cloudbeaver/logs:/opt/cloudbeaver/logs
       - ./cloudbeaver/workspace:/opt/cloudbeaver/workspace
-
-  # Nacos：服务发现与配置中心
-  nacos:
-    image: nacos/nacos-server:v3.0.3
-    container_name: hotel-nacos
-    environment:
-      MODE: standalone
-      PREFER_HOST_MODE: hostname
-      NACOS_AUTH_ENABLE: "false"
-      NACOS_AUTH_TOKEN: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
-      NACOS_AUTH_IDENTITY_KEY: "serverIdentity"
-      NACOS_AUTH_IDENTITY_VALUE: "security"
-    ports:
-      # 说明：当前仅保留 gRPC 端口对外映射。
-      # 如需直连 API 或控制台，可按需开放 8848/8080 映射。
-      # - "8848:8848"
-      # - "8082:8080"
-      - "9848:9848"
 
