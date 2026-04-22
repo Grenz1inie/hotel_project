@@ -1,14 +1,23 @@
 FROM maven:3.9.9-eclipse-temurin-21 AS backend-builder
 WORKDIR /app
 
+ARG MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public
+
+RUN mkdir -p /root/.m2 \
+	&& printf '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">\n  <mirrors>\n    <mirror>\n      <id>aliyunmaven</id>\n      <name>Aliyun Maven</name>\n      <url>%s</url>\n      <mirrorOf>*</mirrorOf>\n    </mirror>\n  </mirrors>\n</settings>\n' "$MAVEN_MIRROR_URL" > /root/.m2/settings.xml
+
 COPY hotel-backend/hotel-backend/pom.xml ./pom.xml
 COPY hotel-backend/hotel-backend/.mvn ./.mvn
 COPY hotel-backend/hotel-backend/mvnw hotel-backend/hotel-backend/mvnw.cmd ./
 RUN chmod +x mvnw || true
-RUN ./mvnw -q -DskipTests dependency:go-offline
+# 【优化1】启用 BuildKit 缓存并在构件时加入 -T 1C 多线程下载加速
+RUN --mount=type=cache,target=/root/.m2/repository \
+    ./mvnw -s /root/.m2/settings.xml -T 1C -DskipTests dependency:go-offline
 
 COPY hotel-backend/hotel-backend/src ./src
-RUN ./mvnw -q -DskipTests clean package
+# 【优化2】编译期也挂载构建缓存，避免重新拉包
+RUN --mount=type=cache,target=/root/.m2/repository \
+    ./mvnw -s /root/.m2/settings.xml -T 1C -DskipTests clean package
 
 FROM eclipse-temurin:21-jre AS backend-runtime
 WORKDIR /app
@@ -18,13 +27,17 @@ ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 
 FROM node:20-alpine AS frontend-builder
 WORKDIR /frontend
-COPY hotel-frontend/package*.json ./
-RUN npm install
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+COPY hotel-frontend/package*.json hotel-frontend/.npmrc ./
+# 【优化3】为 npm 同样配置专用包缓存层
+RUN --mount=type=cache,target=/frontend/.npm \
+	npm config set registry ${NPM_REGISTRY} \
+	&& npm ci --cache /frontend/.npm --prefer-offline --ignore-scripts
 COPY hotel-frontend/ ./
 RUN npm run build
 
 FROM nginx:1.27-alpine AS nginx-runtime
-COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx/nginx.prod.conf /etc/nginx/conf.d/default.conf
 COPY --from=frontend-builder /frontend/build /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

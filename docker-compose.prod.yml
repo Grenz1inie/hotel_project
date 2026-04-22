@@ -1,0 +1,130 @@
+name: hotel_project
+
+# ------------------------------------------------------------
+# Production orchestration
+# - Frontend is built into nginx image (nginx-runtime target)
+# - No standalone frontend runtime container
+# ------------------------------------------------------------
+services:
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    container_name: hotel-oracle
+    restart: always
+    ports:
+      - "1522:1521"
+    environment:
+      - ORACLE_PASSWORD=Hotel_PWD
+      - ORACLE_CHARACTERSET=AL32UTF8
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./oracle/oradata:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'SELECT status FROM v$$instance;' | sqlplus -S system/Hotel_PWD@localhost:1521/FREE | grep -q 'OPEN' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  redis:
+    image: redis:latest
+    container_name: hotel-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis/data:/data
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: hotel-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./minio/data:/data
+
+  nacos:
+    image: nacos/nacos-server:v3.0.3
+    container_name: hotel-nacos
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      NACOS_AUTH_ENABLE: "false"
+      NACOS_AUTH_TOKEN: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+      NACOS_AUTH_IDENTITY_KEY: "serverIdentity"
+      NACOS_AUTH_IDENTITY_VALUE: "security"
+    ports:
+      - "9848:9848"
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-runtime
+    container_name: hotel-backend
+    environment:
+      DB_HOST: oracle
+      DB_PORT: 1521
+      DB_SERVICE: FREEPDB1
+      DB_USERNAME: ${ORACLE_APP_USER:-system}
+      DB_PASSWORD: ${ORACLE_APP_USER_PASSWORD:-Hotel_PWD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-hotel-files}
+      NACOS_SERVER_ADDR: nacos:8848
+      SPRING_CLOUD_NACOS_SERVER_ADDR: nacos:8848
+    depends_on:
+      oracle:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      nacos:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: nginx-runtime
+    image: hotel-nginx:prod
+    container_name: hotel-nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    restart: unless-stopped
+
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:latest
+    container_name: hotel-cloudbeaver
+    depends_on:
+      oracle:
+        condition: service_healthy
+    ports:
+      - "8081:8978"
+    environment:
+      - CLOUDBEAVER_CORE_LOCALIZATION=zh
+      - CB_ADMIN_NAME=admin
+      - CB_ADMIN_PASSWORD=admin_password
+      - CB_SERVER_NAME=CloudBeaverServer
+    volumes:
+      - ./cloudbeaver/logs:/opt/cloudbeaver/logs
+      - ./cloudbeaver/workspace:/opt/cloudbeaver/workspace

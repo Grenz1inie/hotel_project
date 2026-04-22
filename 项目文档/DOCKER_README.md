@@ -1,10 +1,12 @@
-# Docker 一体化部署说明（前后端分离 + Oracle23ai + Redis + MinIO + Nginx + Adminer）
+# Docker 一体化部署说明（开发/生产双模式）
 
 ## 目录约定
-- 根目录: 包含 docker-compose.yml
+- 根目录: 包含 docker-compose.yml（开发模式）
+- 根目录: 包含 docker-compose.prod.yml（生产模式）
 - 根目录: 包含 .dockerignore（限制后端与 nginx 的构建上下文）
 - 根目录: 包含统一 Dockerfile（通过 target 构建 backend 与 nginx 镜像）
-- Nginx 独立目录: nginx/nginx.conf
+- Nginx 独立目录: nginx/nginx.dev.conf（开发模式）
+- Nginx 独立目录: nginx/nginx.prod.conf（生产模式）
 - MinIO 独立目录: minio/data (宿主机数据目录)
 - 前端项目目录保持低侵入，不放置 Dockerfile 与 nginx 配置文件
 - 后端项目目录保持低侵入，不放置 Dockerfile
@@ -15,12 +17,23 @@
 copy .env.example .env
 ```
 
-2. 构建并启动全部服务
+2. 开发模式（前端手动启动，支持热更新）
 ```bash
 docker compose up -d --build
 ```
 
-3. 访问入口
+3. 开发模式下手动启动前端
+```bash
+cd hotel-frontend
+npm start
+```
+
+4. 生产模式（前端编译进 nginx 镜像）
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+5. 访问入口
 - Web 入口: http://localhost/
 - 后端 API: http://localhost/api/
 - 后端直连: http://localhost:8080/
@@ -37,15 +50,16 @@ docker compose up -d --build
 - redis: redis:7.4-alpine
 - minio: 对象存储服务
 - backend: Spring Boot 服务，使用环境变量连接 Oracle/Redis/MinIO
-- nginx: 统一入口，静态托管前端并反向代理 /api 与 /images
-- adminer: 轻量级数据库 Web 控制台，用于管理 Oracle 等数据库
+- nginx（开发模式）: 统一入口，将 / 代理到宿主机前端开发服务（默认 3000），并反向代理 /api 与 /images
+- nginx（生产模式）: 统一入口，静态托管前端构建产物，并反向代理 /api 与 /images
+- cloudbeaver: 数据库 Web 控制台，用于管理 Oracle 等数据库
 
 ## 数据挂载
 - Oracle 数据卷: Docker named volume (oracle-data)
 - Redis 数据卷: Docker named volume (redis-data)
 - MinIO 数据目录: ./minio/data 映射到容器 /data
 
-## Adminer 连接 Oracle 指引
+## CloudBeaver 连接 Oracle 指引
 - System: Oracle
 - Server: oracle
 - Username: ${ORACLE_APP_USER:-hotel_user} 或 system
@@ -57,11 +71,20 @@ docker compose up -d --build
 # 查看服务状态
 docker compose ps
 
+# 查看生产模式服务状态
+docker compose -f docker-compose.prod.yml ps
+
 # 查看某个服务日志
 docker compose logs -f backend
 
+# 查看生产模式某个服务日志
+docker compose -f docker-compose.prod.yml logs -f backend
+
 # 停止并删除容器（保留数据卷）
 docker compose down
+
+# 停止并删除生产模式容器（保留数据卷）
+docker compose -f docker-compose.prod.yml down
 
 # 停止并删除容器与数据卷（重置数据库/缓存/对象存储）
 docker compose down -v
