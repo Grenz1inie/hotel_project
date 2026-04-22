@@ -1,0 +1,48 @@
+{
+  "folders": {},
+  "connections": {
+    "oracle-free-23ai": {
+		"provider": "oracle",
+		"driver": "oracle_thin",
+		"name": "Oracle@hotel-oracle(FREEPDB1)",
+		"save-password": true,
+		"show-system-objects": false,
+		"read-only": false,
+		"shared": true,
+		"configuration": {
+			"host": "oracle",
+			"port": "1521",
+			"database": "FREEPDB1",
+			"user": "hotel_user",
+			"password": "123456",
+			"url": "jdbc:oracle:thin:@//hotel-oracle:1521/FREEPDB1",
+			"configurationType": "MANUAL",
+			"type": "dev",
+			"closeIdleConnection": true,
+			"auth-model": "database_native",
+			"bootstrap": {
+				"autocommit": true
+			},
+			"maxConnections": 20,
+			"minConnections": 5,
+			"idleTimeout": 600000
+		}
+	}
+  },
+  "connection-types": {
+    "dev": {
+      "name": "Development",
+      "color": "255,255,255",
+      "description": "Regular development database",
+      "auto-commit": true,
+      "confirm-execute": false,
+      "confirm-data-change": false,
+      "smart-commit": false,
+      "smart-commit-recover": true,
+      "auto-close-transactions": true,
+      "close-transactions-period": 1800,
+      "auto-close-connections": true,
+      "close-connections-period": 14400
+    }
+  }
+}
