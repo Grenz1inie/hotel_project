@@ -18,6 +18,7 @@ services:
       - TZ=Asia/Shanghai
     volumes:
       - ./oracle/oradata:/opt/oracle/oradata
+      - ./init-scripts:/container-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "echo 'SELECT status FROM v$$instance;' | sqlplus -S system/Hotel_PWD@localhost:1521/FREE | grep -q 'OPEN' || exit 1"]
       interval: 30s
@@ -92,7 +93,7 @@ services:
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health/ready || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -122,9 +123,10 @@ services:
       - "8081:8978"
     environment:
       - CLOUDBEAVER_CORE_LOCALIZATION=zh
-      - CB_ADMIN_NAME=admin
-      - CB_ADMIN_PASSWORD=admin_password
+      - CB_ADMIN_NAME=cbadmin
+      - CB_ADMIN_PASSWORD=CbAdmin_2025
       - CB_SERVER_NAME=CloudBeaverServer
     volumes:
       - ./cloudbeaver/logs:/opt/cloudbeaver/logs
       - ./cloudbeaver/workspace:/opt/cloudbeaver/workspace
+      - ./init-scripts/data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/.dbeaver/data-sources.json:ro
