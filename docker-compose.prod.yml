@@ -9,9 +9,9 @@ services:
   oracle:
     image: gvenzl/oracle-free:23-slim
     container_name: hotel-oracle
-    restart: always
+    restart: unless-stopped
     ports:
-      - "1522:1521"
+      - "1521:1521"
     environment:
       - ORACLE_PASSWORD=Hotel_PWD
       - ORACLE_CHARACTERSET=AL32UTF8
@@ -59,7 +59,10 @@ services:
       NACOS_AUTH_IDENTITY_KEY: "serverIdentity"
       NACOS_AUTH_IDENTITY_VALUE: "security"
     ports:
+      - "8848:8848"
       - "9848:9848"
+      - "9849:9849"
+      - "7848:7848"
 
   backend:
     build:
@@ -68,6 +71,7 @@ services:
       target: backend-runtime
     container_name: hotel-backend
     environment:
+      SPRING_PROFILES_ACTIVE: prod
       DB_HOST: oracle
       DB_PORT: 1521
       DB_SERVICE: FREEPDB1
@@ -120,7 +124,7 @@ services:
       oracle:
         condition: service_healthy
     ports:
-      - "8081:8978"
+      - "8978:8978"
     environment:
       - CLOUDBEAVER_CORE_LOCALIZATION=zh
       - CB_ADMIN_NAME=cbadmin

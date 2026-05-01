@@ -17,9 +17,9 @@ services:
   oracle:
     image: gvenzl/oracle-free:23-slim
     container_name: hotel-oracle
-    restart: always
+    restart: unless-stopped
     ports:
-      - "1522:1521"
+      - "1521:1521"
     environment:
       # 身份与认证参数。
       # - ORACLE_PDB=hotelpdb
@@ -78,65 +78,22 @@ services:
       NACOS_AUTH_IDENTITY_KEY: "serverIdentity"
       NACOS_AUTH_IDENTITY_VALUE: "security"
     ports:
-      # 端口策略：默认仅暴露 gRPC 通信端口。
-      # 如需访问控制台或 HTTP API，可按需启用 8848/8080 映射。
-      # - "8848:8848"
-      # - "8082:8080"
+      # 端口策略：暴露 HTTP 与 gRPC 通信端口。
+      - "8848:8848"
       - "9848:9848"
+      - "9849:9849"
+      - "7848:7848"
 
   # ============================================================
   # 二、应用服务层
   # 说明：承载业务接口、页面资源与统一入口代理。
   # ============================================================
 
-  # Spring Boot 后端服务
-  # 说明：依赖数据库、缓存、对象存储与配置中心。
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: backend-runtime
-    container_name: hotel-backend
-    environment:
-      DB_HOST: oracle
-      DB_PORT: 1521
-      DB_SERVICE: FREEPDB1
-      DB_USERNAME: ${ORACLE_APP_USER:-system}
-      DB_PASSWORD: ${ORACLE_APP_USER_PASSWORD:-Hotel_PWD}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-hotel-files}
-      NACOS_SERVER_ADDR: nacos:8848
-      SPRING_CLOUD_NACOS_SERVER_ADDR: nacos:8848
-    depends_on:
-      oracle:
-        condition: service_healthy
-      redis:
-        condition: service_started
-      minio:
-        condition: service_started
-      nacos:
-        condition: service_started
-    ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 40s
-
   # Nginx：统一入口网关
-  # 说明：开发模式下将 / 代理到宿主机手动启动的前端（默认 3000）。
+  # 说明：开发模式下代理到宿主机手动启动的前端（默认 3000）与后端（默认 8080）。
   nginx:
     image: nginx:1.27-alpine
     container_name: hotel-nginx
-    depends_on:
-      backend:
-        condition: service_healthy
     volumes:
       - ./nginx/nginx.dev.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
