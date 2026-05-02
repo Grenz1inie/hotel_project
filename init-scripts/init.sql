@@ -475,8 +475,8 @@ VALUES (seq_hotel.NEXTVAL,
         5,
         1,
         '星河国际大酒店坐落于国贸CBD核心区，拥有双塔地标建筑和330间现代客房，为商旅人士和高端宾客提供“云中居停”体验。酒店引入数字化前台、24小时行政酒廊、跨界艺术展以及京派与法餐融合的餐饮场景，提供一站式会议与社交服务。',
-        '/images/hotels/xinghe-hero.jpg',
-        '/images/hotels/xinghe-gallery0.jpg,/images/hotels/xinghe-gallery1.jpg');
+        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-hero.jpg',
+        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery0.jpg,https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery1.jpg');
 
 INSERT INTO hotel (id, name, address, city, phone, star_level, status, introduction, hero_image_url, gallery_images)
 VALUES (seq_hotel.NEXTVAL,
@@ -487,8 +487,8 @@ VALUES (seq_hotel.NEXTVAL,
         4,
         1,
         '海滩假日酒店依江而建，以“都市中心度假”为理念，设有阳台景观客房、儿童探险乐园和江景无边泳池。酒店引入空气净化、智能语音控制和亲子烘焙课程，满足城市家庭和情侣的周末微度假需求。',
-        '/images/hotels/xinghe-hero.jpg',
-        '/images/hotels/xinghe-gallery0.jpg,/images/hotels/xinghe-gallery1.jpg');
+        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-hero.jpg',
+        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery0.jpg,https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery1.jpg');
 
 INSERT INTO hotel (id, name, address, city, phone, star_level, status, introduction, hero_image_url, gallery_images)
 VALUES (seq_hotel.NEXTVAL,
@@ -499,8 +499,8 @@ VALUES (seq_hotel.NEXTVAL,
         5,
         1,
         '云栖温泉度假酒店依青城山脚而建，拥抱自然山林与温泉，提供私汤别墅、露天温泉泡池和瑜伽冥想课程。酒店以“回归自然”的生活方式为灵感，引入从农场到餐桌的有机餐饮、亲子自然课堂和星空露营，为都市旅人带来深度疗愈体验。',
-        '/images/hotels/xinghe-hero.jpg',
-        '/images/hotels/xinghe-gallery0.jpg,/images/hotels/xinghe-gallery1.jpg');
+        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-hero.jpg',
+        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery0.jpg,https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery1.jpg');
 
 -- 用户数据
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
@@ -680,26 +680,26 @@ INSERT INTO room_images (id, room_type_id, url, is_primary, sort_order)
 SELECT seq_room_images.NEXTVAL, rt.id, urls.url, urls.is_primary, urls.sort_order
 FROM room_type rt
 JOIN (
-    SELECT 1 AS seq, '星河行政大床房' AS name, '/images/rooms/xinghe-exec-1.jpg' AS url, 1 AS is_primary, 1 AS sort_order FROM DUAL UNION ALL
-    SELECT 2, '星河行政大床房', '/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 3, '星河行政大床房', '/images/rooms/xinghe-exec-3.jpg', 0, 3 FROM DUAL UNION ALL
-    SELECT 4, '星河家庭套房', '/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 5, '星河家庭套房', '/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 6, '星河家庭套房', '/images/rooms/xinghe-family-3.jpg', 0, 3 FROM DUAL UNION ALL
-    SELECT 7, '星河城市景观房', '/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 8, '星河城市景观房', '/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 9, '海景观景房', '/images/rooms/xinghe-exec-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 10, '海景观景房', '/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 11, '海豚家庭主题房', '/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 12, '海豚家庭主题房', '/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 13, '海天云顶套房', '/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 14, '海天云顶套房', '/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 15, '云栖私汤大床房', '/images/rooms/xinghe-exec-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 16, '云栖私汤大床房', '/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 17, '云栖森林木屋', '/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 18, '云栖森林木屋', '/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 19, '云栖禅意套房', '/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 20, '云栖禅意套房', '/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL
+    SELECT 1 AS seq, '星河行政大床房' AS name, 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-1.jpg' AS url, 1 AS is_primary, 1 AS sort_order FROM DUAL UNION ALL
+    SELECT 2, '星河行政大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT 3, '星河行政大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-3.jpg', 0, 3 FROM DUAL UNION ALL
+    SELECT 4, '星河家庭套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT 5, '星河家庭套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT 6, '星河家庭套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-3.jpg', 0, 3 FROM DUAL UNION ALL
+    SELECT 7, '星河城市景观房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT 8, '星河城市景观房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT 9, '海景观景房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT 10, '海景观景房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT 11, '海豚家庭主题房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT 12, '海豚家庭主题房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT 13, '海天云顶套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT 14, '海天云顶套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT 15, '云栖私汤大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT 16, '云栖私汤大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT 17, '云栖森林木屋', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT 18, '云栖森林木屋', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT 19, '云栖禅意套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT 20, '云栖禅意套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL
 ) urls ON urls.name = rt.name;
 
 -- 更新房型图片字段
