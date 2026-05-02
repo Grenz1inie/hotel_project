@@ -1,21 +1,49 @@
 ALTER SESSION SET CONTAINER = FREEPDB1;
--- 创建表空间
+
+-- ============================================================================
+-- 表空间管理
+-- ============================================================================
 BEGIN
     EXECUTE IMMEDIATE '
         CREATE TABLESPACE hotel_ts
-        DATAFILE ''hotel_ts.dbf'' SIZE 500M
+        DATAFILE ''/opt/oracle/oradata/hotel_ts.dbf'' SIZE 500M
         AUTOEXTEND ON NEXT 100M MAXSIZE 2G
         EXTENT MANAGEMENT LOCAL
         SEGMENT SPACE MANAGEMENT AUTO
     ';
-EXCEPTION
-    WHEN OTHERS THEN
-        IF SQLCODE != -959 THEN -- ORA-00959: tablespace already exists
-            RAISE;
-        END IF;
+EXCEPTION WHEN OTHERS THEN
+    IF SQLCODE != -959 THEN RAISE; END IF;
 END;
 /
--- 创建普通用户 hotel_user，指定默认表空间和临时表空间
+
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE TABLESPACE hotel_idx_ts
+        DATAFILE ''/opt/oracle/oradata/hotel_idx_ts.dbf'' SIZE 200M
+        AUTOEXTEND ON NEXT 50M MAXSIZE 2G
+        EXTENT MANAGEMENT LOCAL
+        SEGMENT SPACE MANAGEMENT AUTO
+    ';
+EXCEPTION WHEN OTHERS THEN
+    IF SQLCODE != -959 THEN RAISE; END IF;
+END;
+/
+
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE TABLESPACE hotel_lob_ts
+        DATAFILE ''/opt/oracle/oradata/hotel_lob_ts.dbf'' SIZE 200M
+        AUTOEXTEND ON NEXT 50M MAXSIZE 2G
+        EXTENT MANAGEMENT LOCAL
+        SEGMENT SPACE MANAGEMENT AUTO
+    ';
+EXCEPTION WHEN OTHERS THEN
+    IF SQLCODE != -959 THEN RAISE; END IF;
+END;
+/
+-- ============================================================================
+-- 用户与角色
+-- ============================================================================
 BEGIN
     EXECUTE IMMEDIATE '
         CREATE USER hotel_user
@@ -23,57 +51,65 @@ BEGIN
         DEFAULT TABLESPACE hotel_ts
         TEMPORARY TABLESPACE TEMP
         QUOTA UNLIMITED ON hotel_ts
+        QUOTA UNLIMITED ON hotel_idx_ts
+        QUOTA UNLIMITED ON hotel_lob_ts
     ';
-EXCEPTION
-    WHEN OTHERS THEN
-        IF SQLCODE != -1920 THEN -- ORA-01920: user already exists
-            RAISE;
-        END IF;
+EXCEPTION WHEN OTHERS THEN
+    IF SQLCODE != -1920 THEN RAISE; END IF;
 END;
 /
--- 授予基本权限
-GRANT CREATE SESSION TO hotel_user;
-GRANT CREATE TABLE TO hotel_user;
-GRANT CREATE VIEW TO hotel_user;
-GRANT CREATE SEQUENCE TO hotel_user;
-GRANT CREATE TRIGGER TO hotel_user;
-GRANT CREATE PROCEDURE TO hotel_user;
-GRANT CREATE TYPE TO hotel_user;
-GRANT UNLIMITED TABLESPACE TO hotel_user;
 
+-- 创建角色并授权
+CREATE ROLE hotel_app_role;
+GRANT CREATE SESSION TO hotel_app_role;
+GRANT CREATE TABLE TO hotel_app_role;
+GRANT CREATE VIEW TO hotel_app_role;
+GRANT CREATE MATERIALIZED VIEW TO hotel_app_role;
+GRANT CREATE SEQUENCE TO hotel_app_role;
+GRANT CREATE TRIGGER TO hotel_app_role;
+GRANT CREATE PROCEDURE TO hotel_app_role;
+GRANT CREATE TYPE TO hotel_app_role;
+GRANT CREATE JOB TO hotel_app_role;
+GRANT CREATE SYNONYM TO hotel_app_role;
+GRANT CREATE INDEXTYPE TO hotel_app_role;
+GRANT hotel_app_role TO hotel_user;
+
+CONNECT hotel_user/123456@localhost:1521/FREEPDB1;
 ALTER SESSION SET CURRENT_SCHEMA = HOTEL_USER;
--- 1. 删除表 (顺序：从子表到主表)
-DROP TABLE IF EXISTS vacancy_statistics CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS vip_level_policy CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS wallet_transaction CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS payment_record CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS wallet_account CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS bookings CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS room_maintenance CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS room_price_strategy CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS room_images CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS room CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS room_type CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS users CASCADE CONSTRAINTS;
-DROP TABLE IF EXISTS hotel CASCADE CONSTRAINTS;
 
--- 2. 删除序列
-DROP SEQUENCE IF EXISTS seq_hotel;
-DROP SEQUENCE IF EXISTS seq_users;
-DROP SEQUENCE IF EXISTS seq_room_type;
-DROP SEQUENCE IF EXISTS seq_room_price_strategy;
-DROP SEQUENCE IF EXISTS seq_room_images;
-DROP SEQUENCE IF EXISTS seq_room;
-DROP SEQUENCE IF EXISTS seq_room_maintenance;
-DROP SEQUENCE IF EXISTS seq_bookings;
-DROP SEQUENCE IF EXISTS seq_wallet_account;
-DROP SEQUENCE IF EXISTS seq_wallet_transaction;
-DROP SEQUENCE IF EXISTS seq_payment_record;
-DROP SEQUENCE IF EXISTS seq_vacancy_statistics;
+-- ============================================================================
+-- 清理旧对象
+-- ============================================================================
+BEGIN
+    FOR rec IN (SELECT table_name FROM user_tables WHERE table_name IN (
+        'VACANCY_STATISTICS','VIP_LEVEL_POLICY','WALLET_TRANSACTION','PAYMENT_RECORD',
+        'WALLET_ACCOUNT','BOOKINGS','ROOM_MAINTENANCE','ROOM_PRICE_STRATEGY',
+        'ROOM_IMAGES','ROOM','ROOM_TYPE','USERS','HOTEL_GALLERY','HOTEL',
+        'MV_DAILY_BOOKING_STATS'
+    )) LOOP
+        EXECUTE IMMEDIATE 'DROP TABLE "' || rec.table_name || '" CASCADE CONSTRAINTS';
+    END LOOP;
+    FOR rec IN (SELECT sequence_name FROM user_sequences) LOOP
+        EXECUTE IMMEDIATE 'DROP SEQUENCE "' || rec.sequence_name || '"';
+    END LOOP;
+    FOR rec IN (SELECT view_name FROM user_views WHERE view_name IN (
+        'V_HOTEL_ROOM_AVAILABILITY','V_USER_VIP_INFO','V_DAILY_BOOKING_STATS'
+    )) LOOP
+        EXECUTE IMMEDIATE 'DROP VIEW "' || rec.view_name || '"';
+    END LOOP;
+    FOR rec IN (SELECT mview_name FROM user_mviews WHERE mview_name = 'MV_DAILY_BOOKING_STATS') LOOP
+        EXECUTE IMMEDIATE 'DROP MATERIALIZED VIEW "' || rec.mview_name || '"';
+    END LOOP;
+END;
+/
 
--- 创建表 hotel
+-- ============================================================================
+-- 建表
+-- ============================================================================
+
+-- 酒店主表
 CREATE TABLE hotel (
-    id               NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id               NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name             VARCHAR2(100) NOT NULL,
     address          VARCHAR2(255) NOT NULL,
     city             VARCHAR2(50) NOT NULL,
@@ -82,11 +118,10 @@ CREATE TABLE hotel (
     status           NUMBER(3) DEFAULT 1 NOT NULL,
     introduction     CLOB NOT NULL,
     hero_image_url   VARCHAR2(500) NOT NULL,
-    gallery_images   CLOB,
     created_time     DATE DEFAULT SYSDATE NOT NULL,
     updated_time     DATE DEFAULT SYSDATE NOT NULL,
     CONSTRAINT uq_hotel_name UNIQUE (name)
-);
+) LOB (introduction) STORE AS SECUREFILE (TABLESPACE hotel_lob_ts);
 
 COMMENT ON TABLE hotel IS '酒店信息表';
 COMMENT ON COLUMN hotel.id IS '酒店ID';
@@ -98,15 +133,24 @@ COMMENT ON COLUMN hotel.star_level IS '星级（0 = 未评级）';
 COMMENT ON COLUMN hotel.status IS '状态（1 = 营业中，0 = 已关闭）';
 COMMENT ON COLUMN hotel.introduction IS '酒店介绍';
 COMMENT ON COLUMN hotel.hero_image_url IS '主图URL';
-COMMENT ON COLUMN hotel.gallery_images IS '相册图片（逗号分隔的URL）';
 COMMENT ON COLUMN hotel.created_time IS '创建时间';
 COMMENT ON COLUMN hotel.updated_time IS '更新时间';
 
-CREATE INDEX idx_city ON hotel(city);
+-- 酒店相册子表
+CREATE TABLE hotel_gallery (
+    id         NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    hotel_id   NUMBER(19) NOT NULL,
+    url        VARCHAR2(500) NOT NULL,
+    sort_order NUMBER(10) DEFAULT 0 NOT NULL,
+    created_at DATE DEFAULT SYSDATE NOT NULL,
+    CONSTRAINT fk_hotel_gallery_hotel FOREIGN KEY (hotel_id) REFERENCES hotel(id) ON DELETE CASCADE
+);
 
--- 创建表 users
+COMMENT ON TABLE hotel_gallery IS '酒店相册图片表';
+
+-- 用户表
 CREATE TABLE users (
-    id                 NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id                 NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     username           VARCHAR2(20) NOT NULL,
     password           VARCHAR2(255) NOT NULL,
     role               VARCHAR2(10) DEFAULT 'USER' NOT NULL CHECK (role IN ('ADMIN', 'USER')),
@@ -127,21 +171,10 @@ CREATE TABLE users (
 );
 
 COMMENT ON TABLE users IS '用户表';
-COMMENT ON COLUMN users.id IS '用户ID';
-COMMENT ON COLUMN users.username IS '用户名，3-20个字符，支持字母、数字、下划线、中文';
-COMMENT ON COLUMN users.password IS '密码，6-50个字符';
-COMMENT ON COLUMN users.role IS '用户角色';
-COMMENT ON COLUMN users.vip_level IS 'VIP等级，0-4';
-COMMENT ON COLUMN users.total_consumption IS '年度总消费额（用于VIP升级计算）';
-COMMENT ON COLUMN users.phone IS '联系电话（支持国内11位和国际号码，包括+和-）';
-COMMENT ON COLUMN users.email IS '邮箱，可选';
-COMMENT ON COLUMN users.status IS '账户状态';
-COMMENT ON COLUMN users.created_at IS '创建时间';
-COMMENT ON COLUMN users.updated_at IS '更新时间';
 
--- 创建表 vip_level_policy
+-- VIP 等级政策
 CREATE TABLE vip_level_policy (
-    vip_level          NUMBER(3) PRIMARY KEY,
+    vip_level      NUMBER(3) PRIMARY KEY,
     name           VARCHAR2(50) NOT NULL,
     discount_rate  NUMBER(4,3) DEFAULT 1.000 NOT NULL,
     checkout_hour  NUMBER(3) DEFAULT 12 NOT NULL,
@@ -151,17 +184,10 @@ CREATE TABLE vip_level_policy (
 );
 
 COMMENT ON TABLE vip_level_policy IS 'VIP等级权益政策';
-COMMENT ON COLUMN vip_level_policy.vip_level IS 'VIP等级';
-COMMENT ON COLUMN vip_level_policy.name IS '等级名称';
-COMMENT ON COLUMN vip_level_policy.discount_rate IS '基础折扣率';
-COMMENT ON COLUMN vip_level_policy.checkout_hour IS '退房时间（0-23点）';
-COMMENT ON COLUMN vip_level_policy.description IS '权益描述';
-COMMENT ON COLUMN vip_level_policy.created_at IS '创建时间';
-COMMENT ON COLUMN vip_level_policy.updated_at IS '更新时间';
 
--- 创建表 room_type
+-- 房型表
 CREATE TABLE room_type (
-    id               NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id               NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     hotel_id         NUMBER(19) NOT NULL,
     name             VARCHAR2(80) NOT NULL,
     type             VARCHAR2(60) NOT NULL,
@@ -171,7 +197,7 @@ CREATE TABLE room_type (
     total_count      NUMBER(10) DEFAULT 0 NOT NULL,
     available_count  NUMBER(10) DEFAULT 0 NOT NULL,
     images           CLOB,
-    amenities        CLOB,
+    amenities        JSON,
     area_sqm         NUMBER(6,2),
     bed_type         VARCHAR2(30),
     max_guests       NUMBER(10) DEFAULT 2 NOT NULL,
@@ -179,33 +205,14 @@ CREATE TABLE room_type (
     created_time     DATE DEFAULT SYSDATE NOT NULL,
     updated_time     DATE DEFAULT SYSDATE NOT NULL,
     CONSTRAINT fk_room_type_hotel FOREIGN KEY (hotel_id) REFERENCES hotel(id) ON DELETE CASCADE
-);
+) LOB (description) STORE AS SECUREFILE (TABLESPACE hotel_lob_ts);
 
 COMMENT ON TABLE room_type IS '房型表';
-COMMENT ON COLUMN room_type.id IS '房型ID';
-COMMENT ON COLUMN room_type.hotel_id IS '酒店ID';
-COMMENT ON COLUMN room_type.name IS '房型名称（前端展示名）';
-COMMENT ON COLUMN room_type.type IS '房型分类（如：豪华/标准）';
-COMMENT ON COLUMN room_type.theme_color IS '前端主题色（#RRGGBB）';
-COMMENT ON COLUMN room_type.description IS '房型描述';
-COMMENT ON COLUMN room_type.price_per_night IS '基础价格（元/晚）';
-COMMENT ON COLUMN room_type.total_count IS '该房型总数';
-COMMENT ON COLUMN room_type.available_count IS '当前可预订数量';
-COMMENT ON COLUMN room_type.images IS '房型图片（逗号分隔的URL）';
 COMMENT ON COLUMN room_type.amenities IS '设施列表（JSON格式）';
-COMMENT ON COLUMN room_type.area_sqm IS '面积（平方米）';
-COMMENT ON COLUMN room_type.bed_type IS '床型';
-COMMENT ON COLUMN room_type.max_guests IS '最多入住人数';
-COMMENT ON COLUMN room_type.is_active IS '状态（1=启用，0=禁用）';
-COMMENT ON COLUMN room_type.created_time IS '创建时间';
-COMMENT ON COLUMN room_type.updated_time IS '更新时间';
 
-CREATE INDEX idx_room_type_hotel ON room_type(hotel_id);
-CREATE INDEX idx_room_type_active ON room_type(hotel_id, is_active);
-
--- 创建表 room
+-- 房间表
 CREATE TABLE room (
-    id                 NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id                 NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     hotel_id           NUMBER(19) NOT NULL,
     room_type_id       NUMBER(19) NOT NULL,
     room_number        VARCHAR2(20) NOT NULL,
@@ -220,23 +227,10 @@ CREATE TABLE room (
 );
 
 COMMENT ON TABLE room IS '房间表';
-COMMENT ON COLUMN room.id IS '房间ID';
-COMMENT ON COLUMN room.hotel_id IS '酒店ID';
-COMMENT ON COLUMN room.room_type_id IS '房型ID';
-COMMENT ON COLUMN room.room_number IS '房间号';
-COMMENT ON COLUMN room.floor IS '楼层';
-COMMENT ON COLUMN room.status IS '房间状态（1空闲，2已预订，3已入住，4待清洁，5维修中）';
-COMMENT ON COLUMN room.last_checkout_time IS '最近一次退房时间';
-COMMENT ON COLUMN room.created_time IS '创建时间';
-COMMENT ON COLUMN room.updated_time IS '更新时间';
 
-CREATE INDEX idx_room_type ON room(room_type_id);
-CREATE INDEX idx_room_status ON room(hotel_id, status);
-CREATE INDEX idx_room_type_status ON room(room_type_id, status);
-
--- 创建表 room_images
+-- 房型图片
 CREATE TABLE room_images (
-    id           NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id           NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     room_type_id NUMBER(19) NOT NULL,
     url          VARCHAR2(1000) NOT NULL,
     is_primary   NUMBER(1) DEFAULT 0 NOT NULL,
@@ -247,11 +241,9 @@ CREATE TABLE room_images (
 
 COMMENT ON TABLE room_images IS '房型图片表';
 
-CREATE INDEX idx_room_images_type ON room_images(room_type_id);
-
--- 创建表 room_price_strategy
+-- 价格策略
 CREATE TABLE room_price_strategy (
-    id            NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id            NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     hotel_id      NUMBER(19) NOT NULL,
     room_type_id  NUMBER(19) NOT NULL,
     strategy_type NUMBER(3) NOT NULL,
@@ -270,11 +262,9 @@ CREATE TABLE room_price_strategy (
 
 COMMENT ON TABLE room_price_strategy IS '房间价格策略表';
 
-CREATE INDEX idx_price_strategy_rt ON room_price_strategy(room_type_id, start_date, end_date);
-
--- 创建表 room_maintenance
+-- 维护记录
 CREATE TABLE room_maintenance (
-    id               NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id               NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     room_id          NUMBER(19) NOT NULL,
     maintenance_type VARCHAR2(50) NOT NULL,
     description      CLOB,
@@ -285,16 +275,11 @@ CREATE TABLE room_maintenance (
     created_time     DATE DEFAULT SYSDATE NOT NULL,
     updated_time     DATE DEFAULT SYSDATE NOT NULL,
     CONSTRAINT fk_room_maintenance_room FOREIGN KEY (room_id) REFERENCES room(id) ON DELETE CASCADE
-);
+) LOB (description) STORE AS SECUREFILE (TABLESPACE hotel_lob_ts);
 
-COMMENT ON TABLE room_maintenance IS '房间维护记录表';
-
-CREATE INDEX idx_room_maintenance_room ON room_maintenance(room_id);
-CREATE INDEX idx_room_maintenance_status ON room_maintenance(status, start_time);
-
--- 创建表 bookings
+-- 预订表
 CREATE TABLE bookings (
-    id                   NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id                   NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     hotel_id             NUMBER(19) NOT NULL,
     room_type_id         NUMBER(19) NOT NULL,
     room_id              NUMBER(19) NOT NULL,
@@ -333,66 +318,36 @@ CREATE TABLE bookings (
 
 COMMENT ON TABLE bookings IS '预订表';
 
-CREATE INDEX idx_bookings_user ON bookings(user_id);
-CREATE INDEX idx_bookings_status ON bookings(status);
-CREATE INDEX idx_bookings_room ON bookings(room_id);
-CREATE INDEX idx_bookings_room_period_full ON bookings(room_id, start_time, end_time);
-CREATE INDEX idx_bookings_period ON bookings(start_time, end_time);
-CREATE INDEX idx_bookings_room_type_period ON bookings(room_type_id, start_time);
-CREATE INDEX idx_bookings_room_type_room ON bookings(room_type_id, room_id, start_time);
-
--- 创建表 vacancy_statistics
+-- 空房统计
 CREATE TABLE vacancy_statistics (
-    id               NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    hotel_id         NUMBER(19) NOT NULL,
-    room_type_id     NUMBER(19) NOT NULL,
-    stat_date        DATE NOT NULL,
-    stat_hour        NUMBER(3),
-    total_rooms      NUMBER(10) DEFAULT 0 NOT NULL,
-    available_rooms  NUMBER(10) DEFAULT 0 NOT NULL,
-    occupied_rooms   NUMBER(10) DEFAULT 0 NOT NULL,
-    reserved_rooms   NUMBER(10) DEFAULT 0 NOT NULL,
+    id                NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    hotel_id          NUMBER(19) NOT NULL,
+    room_type_id      NUMBER(19) NOT NULL,
+    stat_date         DATE NOT NULL,
+    stat_hour         NUMBER(3),
+    total_rooms       NUMBER(10) DEFAULT 0 NOT NULL,
+    available_rooms   NUMBER(10) DEFAULT 0 NOT NULL,
+    occupied_rooms    NUMBER(10) DEFAULT 0 NOT NULL,
+    reserved_rooms    NUMBER(10) DEFAULT 0 NOT NULL,
     maintenance_rooms NUMBER(10) DEFAULT 0 NOT NULL,
-    locked_rooms     NUMBER(10) DEFAULT 0 NOT NULL,
-    vacancy_count    NUMBER(10,2) DEFAULT 0.00 NOT NULL,
-    vacancy_rate     NUMBER(5,4) DEFAULT 0.0000 NOT NULL,
-    occupancy_rate   NUMBER(5,4) DEFAULT 0.0000 NOT NULL,
-    booking_rate     NUMBER(5,4) DEFAULT 0.0000 NOT NULL,
-    average_price    NUMBER(10,2),
-    created_at       DATE DEFAULT SYSDATE NOT NULL,
-    updated_at       DATE DEFAULT SYSDATE NOT NULL,
+    locked_rooms      NUMBER(10) DEFAULT 0 NOT NULL,
+    vacancy_count     NUMBER(10,2) DEFAULT 0.00 NOT NULL,
+    vacancy_rate      NUMBER(5,4) DEFAULT 0.0000 NOT NULL,
+    occupancy_rate    NUMBER(5,4) DEFAULT 0.0000 NOT NULL,
+    booking_rate      NUMBER(5,4) DEFAULT 0.0000 NOT NULL,
+    average_price     NUMBER(10,2),
+    created_at        DATE DEFAULT SYSDATE NOT NULL,
+    updated_at        DATE DEFAULT SYSDATE NOT NULL,
     CONSTRAINT fk_vacancy_stats_hotel FOREIGN KEY (hotel_id) REFERENCES hotel(id) ON DELETE CASCADE,
     CONSTRAINT fk_vacancy_stats_room_type FOREIGN KEY (room_type_id) REFERENCES room_type(id) ON DELETE CASCADE,
     CONSTRAINT uq_vacancy_stats UNIQUE (hotel_id, room_type_id, stat_date, stat_hour)
 );
 
 COMMENT ON TABLE vacancy_statistics IS '空房统计表';
-COMMENT ON COLUMN vacancy_statistics.id IS '统计ID';
-COMMENT ON COLUMN vacancy_statistics.hotel_id IS '酒店ID';
-COMMENT ON COLUMN vacancy_statistics.room_type_id IS '房型ID';
-COMMENT ON COLUMN vacancy_statistics.stat_date IS '统计日期';
-COMMENT ON COLUMN vacancy_statistics.stat_hour IS '统计小时（0-23），空为日总计';
-COMMENT ON COLUMN vacancy_statistics.total_rooms IS '总房间数';
-COMMENT ON COLUMN vacancy_statistics.available_rooms IS '可售房间数';
-COMMENT ON COLUMN vacancy_statistics.occupied_rooms IS '已入住房间数';
-COMMENT ON COLUMN vacancy_statistics.reserved_rooms IS '已预订房间数';
-COMMENT ON COLUMN vacancy_statistics.maintenance_rooms IS '维修中房间数';
-COMMENT ON COLUMN vacancy_statistics.locked_rooms IS '锁定房间数';
-COMMENT ON COLUMN vacancy_statistics.vacancy_count IS '空房数量';
-COMMENT ON COLUMN vacancy_statistics.vacancy_rate IS '空房率（0-1）';
-COMMENT ON COLUMN vacancy_statistics.occupancy_rate IS '入住率（0-1）';
-COMMENT ON COLUMN vacancy_statistics.booking_rate IS '预订率（0-1）';
-COMMENT ON COLUMN vacancy_statistics.average_price IS '平均价格';
-COMMENT ON COLUMN vacancy_statistics.created_at IS '创建时间';
-COMMENT ON COLUMN vacancy_statistics.updated_at IS '更新时间';
 
-CREATE INDEX idx_vacancy_stats_date ON vacancy_statistics(stat_date);
-CREATE INDEX idx_vacancy_stats_room_type_date ON vacancy_statistics(room_type_id, stat_date);
-CREATE INDEX idx_vacancy_stats_hotel_date ON vacancy_statistics(hotel_id, stat_date);
-
--- 创建表 wallet_account
+-- 钱包账户
 CREATE TABLE wallet_account (
-    id             NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id             NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id        NUMBER(19) NOT NULL,
     balance        NUMBER(12,2) DEFAULT 0.00 NOT NULL,
     frozen_balance NUMBER(12,2) DEFAULT 0.00 NOT NULL,
@@ -403,11 +358,9 @@ CREATE TABLE wallet_account (
     CONSTRAINT uq_wallet_account_user UNIQUE (user_id)
 );
 
-COMMENT ON TABLE wallet_account IS '用户钱包账户';
-
--- 创建表 wallet_transaction
+-- 钱包交易
 CREATE TABLE wallet_transaction (
-    id              NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id              NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     wallet_id       NUMBER(19) NOT NULL,
     user_id         NUMBER(19) NOT NULL,
     booking_id      NUMBER(19),
@@ -424,14 +377,9 @@ CREATE TABLE wallet_transaction (
     CONSTRAINT fk_wallet_tx_booking FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE SET NULL
 );
 
-COMMENT ON TABLE wallet_transaction IS '钱包交易流水';
-
-CREATE INDEX idx_wallet_tx_user ON wallet_transaction(user_id, id);
-CREATE INDEX idx_wallet_tx_booking ON wallet_transaction(booking_id);
-
--- 创建表 payment_record
+-- 支付记录
 CREATE TABLE payment_record (
-    id           NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id           NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     booking_id   NUMBER(19) NOT NULL,
     user_id      NUMBER(19) NOT NULL,
     amount       NUMBER(12,2) NOT NULL,
@@ -447,259 +395,348 @@ CREATE TABLE payment_record (
     CONSTRAINT fk_payment_record_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-COMMENT ON TABLE payment_record IS '直接支付记录';
+-- ============================================================================
+-- 索引创建
+-- ============================================================================
+CREATE INDEX idx_hotel_city ON hotel(city) TABLESPACE hotel_idx_ts;
 
-CREATE INDEX idx_payment_record_user ON payment_record(user_id, id);
+-- 用户表
+CREATE INDEX idx_users_status ON users(status) TABLESPACE hotel_idx_ts;
 
--- 序列定义
-CREATE SEQUENCE seq_hotel START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_users START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_room_type START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_room_price_strategy START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_room_images START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_room START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_room_maintenance START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_bookings START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_wallet_account START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_wallet_transaction START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_payment_record START WITH 1 INCREMENT BY 1;
-CREATE SEQUENCE seq_vacancy_statistics START WITH 1 INCREMENT BY 1;
+-- 房型
+CREATE INDEX idx_room_type_hotel ON room_type(hotel_id) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_room_type_active ON room_type(hotel_id, is_active) TABLESPACE hotel_idx_ts;
 
--- 酒店数据
-INSERT INTO hotel (id, name, address, city, phone, star_level, status, introduction, hero_image_url, gallery_images)
-VALUES (seq_hotel.NEXTVAL,
-        '星河国际大酒店',
-        '北京市朝阳区建国路99号',
-        '北京',
-        '010-88886666',
-        5,
-        1,
+-- 房间
+CREATE INDEX idx_room_type ON room(room_type_id) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_room_status ON room(hotel_id, status) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_room_type_status ON room(room_type_id, status) TABLESPACE hotel_idx_ts;
+
+-- 房型图片
+CREATE INDEX idx_room_images_type ON room_images(room_type_id) TABLESPACE hotel_idx_ts;
+
+-- 价格策略
+CREATE INDEX idx_price_strategy_rt ON room_price_strategy(room_type_id, start_date, end_date) TABLESPACE hotel_idx_ts;
+
+-- 维护
+CREATE INDEX idx_room_maintenance_room ON room_maintenance(room_id) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_room_maintenance_status ON room_maintenance(status, start_time) TABLESPACE hotel_idx_ts;
+
+-- 预订
+CREATE INDEX idx_bookings_user ON bookings(user_id) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_bookings_status ON bookings(status) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_bookings_room ON bookings(room_id) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_bookings_room_period_full ON bookings(room_id, start_time, end_time) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_bookings_period ON bookings(start_time, end_time) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_bookings_room_type_period ON bookings(room_type_id, start_time) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_bookings_room_type_room ON bookings(room_type_id, room_id, start_time) TABLESPACE hotel_idx_ts;
+
+-- 外键索引
+CREATE INDEX idx_bookings_hotel_fk ON bookings(hotel_id) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_bookings_roomtype_fk ON bookings(room_type_id) TABLESPACE hotel_idx_ts;
+
+-- 函数索引：按天统计
+CREATE INDEX idx_bookings_start_trunc ON bookings(TRUNC(start_time)) TABLESPACE hotel_idx_ts;
+
+-- 钱包
+CREATE INDEX idx_wallet_tx_user ON wallet_transaction(user_id, id) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_wallet_tx_booking ON wallet_transaction(booking_id) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_payment_record_user ON payment_record(user_id, id) TABLESPACE hotel_idx_ts;
+
+-- 空房统计
+CREATE INDEX idx_vacancy_stats_date ON vacancy_statistics(stat_date) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_vacancy_stats_room_type_date ON vacancy_statistics(room_type_id, stat_date) TABLESPACE hotel_idx_ts;
+CREATE INDEX idx_vacancy_stats_hotel_date ON vacancy_statistics(hotel_id, stat_date) TABLESPACE hotel_idx_ts;
+
+-- ============================================================================
+-- 初始化数据
+-- ============================================================================
+
+-- 酒店
+INSERT INTO hotel (name, address, city, phone, star_level, status, introduction, hero_image_url)
+VALUES ('星河国际大酒店', '北京市朝阳区建国路99号', '北京', '010-88886666', 5, 1,
         '星河国际大酒店坐落于国贸CBD核心区，拥有双塔地标建筑和330间现代客房，为商旅人士和高端宾客提供“云中居停”体验。酒店引入数字化前台、24小时行政酒廊、跨界艺术展以及京派与法餐融合的餐饮场景，提供一站式会议与社交服务。',
-        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-hero.jpg',
-        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery0.jpg,https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery1.jpg');
+        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-hero.jpg');
 
-INSERT INTO hotel (id, name, address, city, phone, star_level, status, introduction, hero_image_url, gallery_images)
-VALUES (seq_hotel.NEXTVAL,
-        '海滩假日酒店',
-        '上海市浦东新区滨江大道68号',
-        '上海',
-        '021-66668888',
-        4,
-        1,
+INSERT INTO hotel_gallery (hotel_id, url, sort_order)
+SELECT h.id, 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery0.jpg', 1
+FROM hotel h WHERE h.name = '星河国际大酒店';
+
+INSERT INTO hotel_gallery (hotel_id, url, sort_order)
+SELECT h.id, 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery1.jpg', 2
+FROM hotel h WHERE h.name = '星河国际大酒店';
+
+INSERT INTO hotel (name, address, city, phone, star_level, status, introduction, hero_image_url)
+VALUES ('海滩假日酒店', '上海市浦东新区滨江大道68号', '上海', '021-66668888', 4, 1,
         '海滩假日酒店依江而建，以“都市中心度假”为理念，设有阳台景观客房、儿童探险乐园和江景无边泳池。酒店引入空气净化、智能语音控制和亲子烘焙课程，满足城市家庭和情侣的周末微度假需求。',
-        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-hero.jpg',
-        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery0.jpg,https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery1.jpg');
+        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-hero.jpg');
 
-INSERT INTO hotel (id, name, address, city, phone, star_level, status, introduction, hero_image_url, gallery_images)
-VALUES (seq_hotel.NEXTVAL,
-        '云栖温泉度假酒店',
-        '成都市都江堰市青城山路18号',
-        '成都',
-        '028-86668888',
-        5,
-        1,
+INSERT INTO hotel_gallery (hotel_id, url, sort_order)
+SELECT h.id, 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery0.jpg', 1
+FROM hotel h WHERE h.name = '海滩假日酒店';
+
+INSERT INTO hotel (name, address, city, phone, star_level, status, introduction, hero_image_url)
+VALUES ('云栖温泉度假酒店', '成都市都江堰市青城山路18号', '成都', '028-86668888', 5, 1,
         '云栖温泉度假酒店依青城山脚而建，拥抱自然山林与温泉，提供私汤别墅、露天温泉泡池和瑜伽冥想课程。酒店以“回归自然”的生活方式为灵感，引入从农场到餐桌的有机餐饮、亲子自然课堂和星空露营，为都市旅人带来深度疗愈体验。',
-        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-hero.jpg',
-        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery0.jpg,https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery1.jpg');
+        'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-hero.jpg');
 
--- 用户数据
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'admin', 'adminpass', 'ADMIN', 0, 0.00, '13912345678', 'admin@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'frontdesk', 'frontdesk', 'ADMIN', 0, 0.00, '13923456789', 'frontdesk@hotel.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'alice', 'alicepwd', 'USER', 1, 4309.40, '13812345678', 'alice@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'bob', 'bobpwd', 'USER', 0, 2576.00, '15987654321', 'bob@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'charlie', 'charliepwd', 'USER', 2, 5085.36, '13698745632', 'charlie@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'diana', 'dianapwd', 'USER', 1, 1079.20, '18611223344', 'diana@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'leo', 'leopwd', 'USER', 3, 0.00, '13712349876', 'leo@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'mia', 'miapwd', 'USER', 2, 3163.12, '15712348765', 'mia@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'nina', 'ninapwd', 'USER', 0, 1996.00, '13698761234', 'nina@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'oscar', 'oscarpwd', 'USER', 1, 1320.96, '18623456789', 'oscar@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'paul', 'paulpwd', 'USER', 2, 3438.96, '13787654321', 'paul@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'quinn', 'quinnpwd', 'USER', 3, 2699.60, '15876543210', 'quinn@example.com');
-INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'rachel', 'rachelpwd', 'USER', 4, 2243.52, '13911112222', 'rachel@example.com');
+INSERT INTO hotel_gallery (hotel_id, url, sort_order)
+SELECT h.id, 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/hotels/xinghe-gallery0.jpg', 1
+FROM hotel h WHERE h.name = '云栖温泉度假酒店';
 
--- VIP等级政策
-INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description)
-VALUES (0, '标准会员', 1.000, 12, '免费注册，标准退房时间为次日中午12:00');
-INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description)
-VALUES (1, '白银会员', 0.950, 13, '年累计消费满5000元升级，退房延至次日13:00');
-INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description)
-VALUES (2, '黄金会员', 0.900, 14, '年累计消费满15000元升级，退房延至次日14:00');
-INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description)
-VALUES (3, '铂金会员', 0.880, 15, '年累计消费满30000元升级，退房延至次日15:00');
-INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description)
-VALUES (4, '钻石会员', 0.850, 16, '核心客户定向邀请（建议年消费5万元以上），额外VIP特权及私人管家服务');
+-- 用户
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('admin', 'adminpass', 'ADMIN', 0, 0.00, '13912345678', 'admin@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('frontdesk', 'frontdesk', 'ADMIN', 0, 0.00, '13923456789', 'frontdesk@hotel.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('alice', 'alicepwd', 'USER', 1, 4309.40, '13812345678', 'alice@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('bob', 'bobpwd', 'USER', 0, 2576.00, '15987654321', 'bob@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('charlie', 'charliepwd', 'USER', 2, 5085.36, '13698745632', 'charlie@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('diana', 'dianapwd', 'USER', 1, 1079.20, '18611223344', 'diana@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('leo', 'leopwd', 'USER', 3, 0.00, '13712349876', 'leo@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('mia', 'miapwd', 'USER', 2, 3163.12, '15712348765', 'mia@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('nina', 'ninapwd', 'USER', 0, 1996.00, '13698761234', 'nina@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('oscar', 'oscarpwd', 'USER', 1, 1320.96, '18623456789', 'oscar@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('paul', 'paulpwd', 'USER', 2, 3438.96, '13787654321', 'paul@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('quinn', 'quinnpwd', 'USER', 3, 2699.60, '15876543210', 'quinn@example.com');
+INSERT INTO users (username, password, role, vip_level, total_consumption, phone, email)
+VALUES ('rachel', 'rachelpwd', 'USER', 4, 2243.52, '13911112222', 'rachel@example.com');
+
+-- VIP 等级政策
+INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description) VALUES (0, '标准会员', 1.000, 12, '免费注册，标准退房时间为次日中午12:00');
+INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description) VALUES (1, '白银会员', 0.950, 13, '年累计消费满5000元升级，退房延至次日13:00');
+INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description) VALUES (2, '黄金会员', 0.900, 14, '年累计消费满15000元升级，退房延至次日14:00');
+INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description) VALUES (3, '铂金会员', 0.880, 15, '年累计消费满30000元升级，退房延至次日15:00');
+INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description) VALUES (4, '钻石会员', 0.850, 16, '核心客户定向邀请（建议年消费5万元以上），额外VIP特权及私人管家服务');
 
 -- 钱包账户
-INSERT INTO wallet_account (id, user_id, balance, frozen_balance)
-SELECT seq_wallet_account.NEXTVAL, id,
-       CASE
-           WHEN vip_level >= 3 THEN 18500.00
-           WHEN vip_level = 2 THEN 5000.00
-           WHEN vip_level = 1 THEN 1600.00
-           ELSE 400.00
-       END AS balance,
+INSERT INTO wallet_account (user_id, balance, frozen_balance)
+SELECT id,
+       CASE WHEN vip_level >= 3 THEN 18500.00
+            WHEN vip_level = 2 THEN 5000.00
+            WHEN vip_level = 1 THEN 1600.00
+            ELSE 400.00
+       END,
        0.00
 FROM users;
 
 -- 房型
-INSERT INTO room_type (id, hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
-VALUES (seq_room_type.NEXTVAL, 1, '星河行政大床房', '行政', '#2F54EB',
-        '落地窗景观，含行政酒廊使用权及双人早餐', 568.00, 18, 11, NULL,
-        '["WIFI","55寸电视","空气净化器","浴缸","行政酒廊","USB充电口","高速办公桌","智能窗帘"]',
-        35.0, '大床', 2);
-INSERT INTO room_type (id, hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
-VALUES (seq_room_type.NEXTVAL, 1, '星河家庭套房', '家庭套房', '#D46B08',
-        '双卧室设计，客厅带儿童帐篷及游戏角', 1188.00, 8, 4, NULL,
-        '["WIFI","洗衣机/烘干机","咖啡机","儿童玩具","浴缸","儿童餐具","微波炉","家庭桌游"]',
-        68.0, '大床+单人床', 4);
-INSERT INTO room_type (id, hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
-VALUES (seq_room_type.NEXTVAL, 1, '星河城市景观房', '城景', '#13C2C2',
-        '高层城景房，含欢迎水果及晚间甜点', 468.00, 24, 15, NULL,
-        '["WIFI","蓝牙音箱","迷你吧","浴袍","智能语音控制","夜床服务","香薰机","电子保险箱"]',
-        30.0, '大床', 2);
-INSERT INTO room_type (id, hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
-VALUES (seq_room_type.NEXTVAL, 2, '海景观景房', '海景尊享', '#1D39C4',
-        '阳台直面黄浦江夜景', 828.00, 12, 10, NULL,
-        '["WIFI","阳台躺椅","奈斯派索咖啡机","浴缸","智能窗帘","户外泡池","香薰机","BOSE音响"]',
-        36.0, '大床', 2);
-INSERT INTO room_type (id, hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
-VALUES (seq_room_type.NEXTVAL, 2, '海豚家庭主题房', '亲子主题', '#EB2F96',
-        '家庭主题装饰，含儿童滑梯、绘本和加湿器', 688.00, 14, 12, NULL,
-        '["WIFI","儿童滑梯","绘本角","空气加湿器","浴袍","益智拼图","儿童浴袍","夜光墙贴"]',
-        42.0, '大床+单人床', 4);
-INSERT INTO room_type (id, hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
-VALUES (seq_room_type.NEXTVAL, 2, '海天云顶套房', '云顶套房', '#722ED1',
-        '挑高客厅，含私人管家服务', 1368.00, 5, 3, NULL,
-        '["WIFI","私人管家","家庭影院","梳妆台","浴缸","私人影院","云办公桌","香槟迷你吧"]',
-        92.0, '大床', 3);
-INSERT INTO room_type (id, hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
-VALUES (seq_room_type.NEXTVAL, 3, '云栖私汤大床房', '温泉', '#FA541C',
-        '房内私享温泉泡池，含欢迎水果和晨间瑜伽', 998.00, 10, 9, NULL,
-        '["WIFI","私汤温泉","壁炉","空气净化系统","瑜伽垫","香氛枕","森林浴原声","有机茶包"]',
-        48.0, '大床', 2);
-INSERT INTO room_type (id, hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
-VALUES (seq_room_type.NEXTVAL, 3, '云栖森林木屋', '木屋', '#389E0D',
-        '独栋木质别墅，带露台可观星，适合小型聚会', 1288.00, 6, 4, NULL,
-        '["WIFI","露台壁炉","厨房","投影仪","咖啡机","露营灯","户外烧烤炉","观星望远镜"]',
-        75.0, '大床+沙发床', 4);
-INSERT INTO room_type (id, hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
-VALUES (seq_room_type.NEXTVAL, 3, '云栖禅意套房', '禅意套房', '#531DAB',
-        '榻榻米客厅与茶道角，含双人禅修课程', 1588.00, 4, 3, NULL,
-        '["WIFI","香薰加湿器","茶道角","冥想坐垫","BOSE音响","焚香礼盒","手作茶具","睡眠香薰"]',
-        85.0, '榻榻米', 3);
+INSERT INTO room_type (hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
+SELECT h.id, '星河行政大床房', '行政', '#2F54EB',
+       '落地窗景观，含行政酒廊使用权及双人早餐', 568.00, 18, 11, NULL,
+       '["WIFI","55寸电视","空气净化器","浴缸","行政酒廊","USB充电口","高速办公桌","智能窗帘"]',
+       35.0, '大床', 2
+FROM hotel h WHERE h.name = '星河国际大酒店';
+
+INSERT INTO room_type (hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
+SELECT h.id, '星河家庭套房', '家庭套房', '#D46B08',
+       '双卧室设计，客厅带儿童帐篷及游戏角', 1188.00, 8, 4, NULL,
+       '["WIFI","洗衣机/烘干机","咖啡机","儿童玩具","浴缸","儿童餐具","微波炉","家庭桌游"]',
+       68.0, '大床+单人床', 4
+FROM hotel h WHERE h.name = '星河国际大酒店';
+
+INSERT INTO room_type (hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
+SELECT h.id, '星河城市景观房', '城景', '#13C2C2',
+       '高层城景房，含欢迎水果及晚间甜点', 468.00, 24, 15, NULL,
+       '["WIFI","蓝牙音箱","迷你吧","浴袍","智能语音控制","夜床服务","香薰机","电子保险箱"]',
+       30.0, '大床', 2
+FROM hotel h WHERE h.name = '星河国际大酒店';
+
+INSERT INTO room_type (hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
+SELECT h.id, '海景观景房', '海景尊享', '#1D39C4',
+       '阳台直面黄浦江夜景', 828.00, 12, 10, NULL,
+       '["WIFI","阳台躺椅","奈斯派索咖啡机","浴缸","智能窗帘","户外泡池","香薰机","BOSE音响"]',
+       36.0, '大床', 2
+FROM hotel h WHERE h.name = '海滩假日酒店';
+
+INSERT INTO room_type (hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
+SELECT h.id, '海豚家庭主题房', '亲子主题', '#EB2F96',
+       '家庭主题装饰，含儿童滑梯、绘本和加湿器', 688.00, 14, 12, NULL,
+       '["WIFI","儿童滑梯","绘本角","空气加湿器","浴袍","益智拼图","儿童浴袍","夜光墙贴"]',
+       42.0, '大床+单人床', 4
+FROM hotel h WHERE h.name = '海滩假日酒店';
+
+INSERT INTO room_type (hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
+SELECT h.id, '海天云顶套房', '云顶套房', '#722ED1',
+       '挑高客厅，含私人管家服务', 1368.00, 5, 3, NULL,
+       '["WIFI","私人管家","家庭影院","梳妆台","浴缸","私人影院","云办公桌","香槟迷你吧"]',
+       92.0, '大床', 3
+FROM hotel h WHERE h.name = '海滩假日酒店';
+
+INSERT INTO room_type (hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
+SELECT h.id, '云栖私汤大床房', '温泉', '#FA541C',
+       '房内私享温泉泡池，含欢迎水果和晨间瑜伽', 998.00, 10, 9, NULL,
+       '["WIFI","私汤温泉","壁炉","空气净化系统","瑜伽垫","香氛枕","森林浴原声","有机茶包"]',
+       48.0, '大床', 2
+FROM hotel h WHERE h.name = '云栖温泉度假酒店';
+
+INSERT INTO room_type (hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
+SELECT h.id, '云栖森林木屋', '木屋', '#389E0D',
+       '独栋木质别墅，带露台可观星，适合小型聚会', 1288.00, 6, 4, NULL,
+       '["WIFI","露台壁炉","厨房","投影仪","咖啡机","露营灯","户外烧烤炉","观星望远镜"]',
+       75.0, '大床+沙发床', 4
+FROM hotel h WHERE h.name = '云栖温泉度假酒店';
+
+INSERT INTO room_type (hotel_id, name, type, theme_color, description, price_per_night, total_count, available_count, images, amenities, area_sqm, bed_type, max_guests)
+SELECT h.id, '云栖禅意套房', '禅意套房', '#531DAB',
+       '榻榻米客厅与茶道角，含双人禅修课程', 1588.00, 4, 3, NULL,
+       '["WIFI","香薰加湿器","茶道角","冥想坐垫","BOSE音响","焚香礼盒","手作茶具","睡眠香薰"]',
+       85.0, '榻榻米', 3
+FROM hotel h WHERE h.name = '云栖温泉度假酒店';
 
 -- 常规价格策略（VIP折扣）
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.95, 1, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.90, 2, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.88, 3, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.85, 4, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.96, 1, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.92, 2, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.89, 3, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.86, 4, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.97, 1, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.93, 2, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.90, 3, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1, (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.87, 4, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.94, 1, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.89, 2, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.86, 3, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.83, 4, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.96, 1, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.91, 2, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.88, 3, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.85, 4, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.93, 1, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.88, 2, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.85, 3, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2, (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.82, 4, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.95, 1, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.90, 2, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.87, 3, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.84, 4, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.94, 1, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.89, 2, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.86, 3, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.83, 4, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.93, 1, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.88, 2, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.85, 3, 1, 1);
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3, (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY), 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.82, 4, 1, 1);
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.95, 1, 1, 1
+FROM room_type rt WHERE rt.name = '星河行政大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.90, 2, 1, 1
+FROM room_type rt WHERE rt.name = '星河行政大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.88, 3, 1, 1
+FROM room_type rt WHERE rt.name = '星河行政大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.85, 4, 1, 1
+FROM room_type rt WHERE rt.name = '星河行政大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.96, 1, 1, 1
+FROM room_type rt WHERE rt.name = '星河家庭套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.92, 2, 1, 1
+FROM room_type rt WHERE rt.name = '星河家庭套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.89, 3, 1, 1
+FROM room_type rt WHERE rt.name = '星河家庭套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.86, 4, 1, 1
+FROM room_type rt WHERE rt.name = '星河家庭套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.97, 1, 1, 1
+FROM room_type rt WHERE rt.name = '星河城市景观房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.93, 2, 1, 1
+FROM room_type rt WHERE rt.name = '星河城市景观房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.90, 3, 1, 1
+FROM room_type rt WHERE rt.name = '星河城市景观房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.87, 4, 1, 1
+FROM room_type rt WHERE rt.name = '星河城市景观房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
+
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.94, 1, 1, 1
+FROM room_type rt WHERE rt.name = '海景观景房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.89, 2, 1, 1
+FROM room_type rt WHERE rt.name = '海景观景房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.86, 3, 1, 1
+FROM room_type rt WHERE rt.name = '海景观景房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.83, 4, 1, 1
+FROM room_type rt WHERE rt.name = '海景观景房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.96, 1, 1, 1
+FROM room_type rt WHERE rt.name = '海豚家庭主题房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.91, 2, 1, 1
+FROM room_type rt WHERE rt.name = '海豚家庭主题房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.88, 3, 1, 1
+FROM room_type rt WHERE rt.name = '海豚家庭主题房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.85, 4, 1, 1
+FROM room_type rt WHERE rt.name = '海豚家庭主题房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.93, 1, 1, 1
+FROM room_type rt WHERE rt.name = '海天云顶套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.88, 2, 1, 1
+FROM room_type rt WHERE rt.name = '海天云顶套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.85, 3, 1, 1
+FROM room_type rt WHERE rt.name = '海天云顶套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.82, 4, 1, 1
+FROM room_type rt WHERE rt.name = '海天云顶套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
+
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.95, 1, 1, 1
+FROM room_type rt WHERE rt.name = '云栖私汤大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.90, 2, 1, 1
+FROM room_type rt WHERE rt.name = '云栖私汤大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.87, 3, 1, 1
+FROM room_type rt WHERE rt.name = '云栖私汤大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.84, 4, 1, 1
+FROM room_type rt WHERE rt.name = '云栖私汤大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.94, 1, 1, 1
+FROM room_type rt WHERE rt.name = '云栖森林木屋' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.89, 2, 1, 1
+FROM room_type rt WHERE rt.name = '云栖森林木屋' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.86, 3, 1, 1
+FROM room_type rt WHERE rt.name = '云栖森林木屋' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.83, 4, 1, 1
+FROM room_type rt WHERE rt.name = '云栖森林木屋' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.93, 1, 1, 1
+FROM room_type rt WHERE rt.name = '云栖禅意套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.88, 2, 1, 1
+FROM room_type rt WHERE rt.name = '云栖禅意套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.85, 3, 1, 1
+FROM room_type rt WHERE rt.name = '云栖禅意套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, DATE '2024-01-01', DATE '2030-12-31', 0.00, 0.82, 4, 1, 1
+FROM room_type rt WHERE rt.name = '云栖禅意套房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
 
 -- 房型图片
-INSERT INTO room_images (id, room_type_id, url, is_primary, sort_order)
-SELECT seq_room_images.NEXTVAL, rt.id, urls.url, urls.is_primary, urls.sort_order
+INSERT INTO room_images (room_type_id, url, is_primary, sort_order)
+SELECT rt.id, urls.url, urls.is_primary, urls.sort_order
 FROM room_type rt
 JOIN (
-    SELECT 1 AS seq, '星河行政大床房' AS name, 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-1.jpg' AS url, 1 AS is_primary, 1 AS sort_order FROM DUAL UNION ALL
-    SELECT 2, '星河行政大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 3, '星河行政大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-3.jpg', 0, 3 FROM DUAL UNION ALL
-    SELECT 4, '星河家庭套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 5, '星河家庭套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 6, '星河家庭套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-3.jpg', 0, 3 FROM DUAL UNION ALL
-    SELECT 7, '星河城市景观房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 8, '星河城市景观房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 9, '海景观景房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 10, '海景观景房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 11, '海豚家庭主题房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 12, '海豚家庭主题房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 13, '海天云顶套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 14, '海天云顶套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 15, '云栖私汤大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 16, '云栖私汤大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 17, '云栖森林木屋', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 18, '云栖森林木屋', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
-    SELECT 19, '云栖禅意套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
-    SELECT 20, '云栖禅意套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL
+    SELECT '星河行政大床房' AS name, 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-1.jpg' AS url, 1 AS is_primary, 1 AS sort_order FROM DUAL UNION ALL
+    SELECT '星河行政大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT '星河行政大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-3.jpg', 0, 3 FROM DUAL UNION ALL
+    SELECT '星河家庭套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT '星河家庭套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT '星河家庭套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-3.jpg', 0, 3 FROM DUAL UNION ALL
+    SELECT '星河城市景观房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT '星河城市景观房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT '海景观景房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT '海景观景房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT '海豚家庭主题房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT '海豚家庭主题房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT '海天云顶套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT '海天云顶套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT '云栖私汤大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT '云栖私汤大床房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-exec-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT '云栖森林木屋', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT '云栖森林木屋', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-family-2.jpg', 0, 2 FROM DUAL UNION ALL
+    SELECT '云栖禅意套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-1.jpg', 1, 1 FROM DUAL UNION ALL
+    SELECT '云栖禅意套房', 'https://hotelhotel.oss-cn-beijing.aliyuncs.com/images/rooms/xinghe-city-2.jpg', 0, 2 FROM DUAL
 ) urls ON urls.name = rt.name;
 
 -- 更新房型图片字段
@@ -710,19 +747,19 @@ SET images = (
     WHERE ri.room_type_id = rt.id
 );
 
+SAVEPOINT before_room_insert;
+
 -- 插入房间
-INSERT INTO room (id, hotel_id, room_type_id, room_number, floor, status)
+INSERT INTO room (hotel_id, room_type_id, room_number, floor, status)
 WITH room_type_ranked AS (
     SELECT id, hotel_id, total_count,
            ROW_NUMBER() OVER (PARTITION BY hotel_id ORDER BY id) AS type_rank
     FROM room_type
 ),
 numbers AS (
-    SELECT LEVEL AS n
-    FROM DUAL
-    CONNECT BY LEVEL <= (SELECT MAX(total_count) FROM room_type)
+    SELECT LEVEL AS n FROM DUAL CONNECT BY LEVEL <= (SELECT MAX(total_count) FROM room_type)
 )
-SELECT seq_room.NEXTVAL, rt.hotel_id, rt.id,
+SELECT rt.hotel_id, rt.id,
        CHR(64 + rt.type_rank) || LPAD(FLOOR((n-1)/8) + 1, 2, '0') || LPAD(MOD(n-1,8) + 1, 2, '0') AS room_number,
        FLOOR((n-1)/8) + 1 AS floor,
        1 AS status
@@ -730,629 +767,625 @@ FROM room_type_ranked rt
 JOIN numbers ON n <= rt.total_count;
 
 -- 额外价格策略
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        2, TRUNC(SYSDATE), TRUNC(SYSDATE) + 30, NULL, 0.92, 1, 1, 1);
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 2, TRUNC(SYSDATE), TRUNC(SYSDATE) + 30, NULL, 0.92, 1, 1, 1
+FROM room_type rt WHERE rt.name = '星河城市景观房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
 
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        1, TRUNC(SYSDATE) + 5, TRUNC(SYSDATE) + 12, 180.00, NULL, NULL, 1, 1);
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 1, TRUNC(SYSDATE) + 5, TRUNC(SYSDATE) + 12, 180.00, NULL, NULL, 1, 1
+FROM room_type rt WHERE rt.name = '星河行政大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店');
 
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        3, TRUNC(SYSDATE) + 14, TRUNC(SYSDATE) + 45, NULL, 0.88, NULL, 2, 1);
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 3, TRUNC(SYSDATE) + 14, TRUNC(SYSDATE) + 45, NULL, 0.88, NULL, 2, 1
+FROM room_type rt WHERE rt.name = '海豚家庭主题房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店');
 
-INSERT INTO room_price_strategy (id, hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
-VALUES (seq_room_price_strategy.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        1, TRUNC(SYSDATE) + 20, TRUNC(SYSDATE) + 35, -120.00, NULL, NULL, 1, 1);
+INSERT INTO room_price_strategy (hotel_id, room_type_id, strategy_type, start_date, end_date, price_adjust, discount_rate, vip_level, min_stay_days, status)
+SELECT rt.hotel_id, rt.id, 1, TRUNC(SYSDATE) + 20, TRUNC(SYSDATE) + 35, -120.00, NULL, NULL, 1, 1
+FROM room_type rt WHERE rt.name = '云栖私汤大床房' AND rt.hotel_id = (SELECT id FROM hotel WHERE name='云栖温泉度假酒店');
 
 -- 维护记录
-INSERT INTO room_maintenance (id, room_id, maintenance_type, description, start_time, end_time, operator, status)
-VALUES (seq_room_maintenance.NEXTVAL,
-        (SELECT id FROM (
-            SELECT id FROM room
-            WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1)
-            ORDER BY room_number
-            OFFSET 4 ROWS FETCH NEXT 1 ROWS ONLY
-        )),
-        '空调维修',
-        '温度传感器故障，已联系供应商更换传感器',
-        SYSDATE - 1, NULL, '张维修', 1);
+INSERT INTO room_maintenance (room_id, maintenance_type, description, start_time, end_time, operator, status)
+SELECT room_id, '空调维修', '温度传感器故障，已联系供应商更换传感器', SYSDATE - 1, NULL, '张维修', 1
+FROM (
+    SELECT id AS room_id FROM room
+    WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = (SELECT id FROM hotel WHERE name='星河国际大酒店'))
+    ORDER BY room_number
+    OFFSET 4 ROWS FETCH NEXT 1 ROWS ONLY
+);
 
-INSERT INTO room_maintenance (id, room_id, maintenance_type, description, start_time, end_time, operator, status)
-VALUES (seq_room_maintenance.NEXTVAL,
-        (SELECT id FROM (
-            SELECT id FROM room
-            WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2)
-            ORDER BY room_number
-            OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY
-        )),
-        '地毯清洗',
-        '家庭房地毯上有巧克力渍，需深度清洁',
-        SYSDATE - 3, SYSDATE - 2, '李清洁', 2);
+INSERT INTO room_maintenance (room_id, maintenance_type, description, start_time, end_time, operator, status)
+SELECT room_id, '地毯清洗', '家庭房地毯上有巧克力渍，需深度清洁', SYSDATE - 3, SYSDATE - 2, '李清洁', 2
+FROM (
+    SELECT id AS room_id FROM room
+    WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = (SELECT id FROM hotel WHERE name='海滩假日酒店'))
+    ORDER BY room_number
+    OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY
+);
 
--- 预订记录
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1) ORDER BY room_number FETCH FIRST 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'alice'),
-        TRUNC(SYSDATE) + 3 + 15/24, TRUNC(SYSDATE) + 5 + 12/24,
-        'CONFIRMED', 2, 1079.20, 1136.00, 56.80, 1079.20, 1079.20, 0.95,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '要求高楼层',
-        NULL, NULL, NULL, NULL, NULL);
+-- ============================================================================
+-- 预订数据
+-- ============================================================================
+SAVEPOINT before_bookings;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1) ORDER BY room_number FETCH FIRST 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'alice'),
-        TRUNC(SYSDATE) - 12 + 15/24, TRUNC(SYSDATE) - 9 + 12/24,
-        'CHECKED_OUT', 2, 1333.80, 1404.00, 70.20, 1333.80, 1333.80, 0.95,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '已完成住宿，体验不错',
-        NULL, NULL, NULL, NULL, NULL);
+-- 1
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 3 + 15/24, TRUNC(SYSDATE) + 5 + 12/24,
+       'CONFIRMED', 2, 1079.20, 1136.00, 56.80, 1079.20, 1079.20, 0.95,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '要求高楼层'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河行政大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'alice'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2) ORDER BY room_number FETCH FIRST 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'alice'),
-        TRUNC(SYSDATE) + 25 + 15/24, TRUNC(SYSDATE) + 28 + 12/24,
-        'CANCELLED', 3, 1981.44, 2064.00, 82.56, 1981.44, 0.00, 0.96,
-        'UNPAID', NULL, NULL, 'CNY', '爱丽丝', '13812345678', '用户取消行程',
-        NULL, NULL, NULL, NULL, NULL);
+-- 2
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) - 12 + 15/24, TRUNC(SYSDATE) - 9 + 12/24,
+       'CHECKED_OUT', 2, 1333.80, 1404.00, 70.20, 1333.80, 1333.80, 0.95,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '已完成住宿，体验不错'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河城市景观房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'alice'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1) ORDER BY room_number FETCH FIRST 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'bob'),
-        TRUNC(SYSDATE) + 5 + 15/24, TRUNC(SYSDATE) + 7 + 12/24,
-        'PENDING_PAYMENT', 4, 2376.00, 2376.00, 0.00, 2376.00, 0.00, 1.00,
-        'UNPAID', NULL, NULL, 'CNY', '鲍勃', '15987654321', '等待支付',
-        NULL, NULL, NULL, NULL, NULL);
+-- 3
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 25 + 15/24, TRUNC(SYSDATE) + 28 + 12/24,
+       'CANCELLED', 3, 1981.44, 2064.00, 82.56, 1981.44, 0.00, 0.96,
+       'UNPAID', 'CNY', '爱丽丝', '13812345678', '用户取消行程'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海豚家庭主题房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'alice'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3) ORDER BY room_number FETCH FIRST 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'bob'),
-        TRUNC(SYSDATE) - 40 + 15/24, TRUNC(SYSDATE) - 37 + 12/24,
-        'CHECKED_OUT', 4, 2576.00, 2576.00, 0.00, 2576.00, 2576.00, 1.00,
-        'PAID', 'DIRECT', 'ARRIVAL', 'CNY', '鲍勃', '15987654321', '朋友聚会，好评',
-        NULL, NULL, NULL, NULL, NULL);
+-- 4
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 5 + 15/24, TRUNC(SYSDATE) + 7 + 12/24,
+       'PENDING_PAYMENT', 4, 2376.00, 2376.00, 0.00, 2376.00, 0.00, 1.00,
+       'UNPAID', 'CNY', '鲍勃', '15987654321', '等待支付'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河家庭套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'bob'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2) ORDER BY room_number FETCH FIRST 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'bob'),
-        TRUNC(SYSDATE) - 20 + 15/24, TRUNC(SYSDATE) - 18 + 12/24,
-        'CANCELLED', 2, 1656.00, 1656.00, 0.00, 1656.00, 0.00, 1.00,
-        'UNPAID', NULL, NULL, 'CNY', '鲍勃', '15987654321', '超时未支付自动取消',
-        NULL, NULL, NULL, NULL, NULL);
+-- 5
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) - 40 + 15/24, TRUNC(SYSDATE) - 37 + 12/24,
+       'CHECKED_OUT', 4, 2576.00, 2576.00, 0.00, 2576.00, 2576.00, 1.00,
+       'PAID', 'DIRECT', 'ARRIVAL', 'CNY', '鲍勃', '15987654321', '朋友聚会，好评'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖森林木屋' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'bob'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2) ORDER BY room_number OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'charlie'),
-        TRUNC(SYSDATE) - 1 + 15/24, TRUNC(SYSDATE) + 1 + 12/24,
-        'CHECKED_IN', 2, 1473.84, 1656.00, 182.16, 1473.84, 1473.84, 0.89,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '查理', '13698745632', '正在入住',
-        NULL, NULL, NULL, NULL, NULL);
+-- 6
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) - 20 + 15/24, TRUNC(SYSDATE) - 18 + 12/24,
+       'CANCELLED', 2, 1656.00, 1656.00, 0.00, 1656.00, 0.00, 1.00,
+       'UNPAID', 'CNY', '鲍勃', '15987654321', '超时未支付自动取消'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海景观景房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'bob'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2) ORDER BY room_number FETCH FIRST 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'charlie'),
-        TRUNC(SYSDATE) - 30 + 15/24, TRUNC(SYSDATE) - 27 + 12/24,
-        'CHECKED_OUT', 2, 3611.52, 4104.00, 492.48, 3611.52, 3611.52, 0.88,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '查理', '13698745632', '纪念日入住',
-        NULL, NULL, NULL, NULL, NULL);
+-- 7
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) - 1 + 15/24, TRUNC(SYSDATE) + 1 + 12/24,
+       'CHECKED_IN', 2, 1473.84, 1656.00, 182.16, 1473.84, 1473.84, 0.89,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '查理', '13698745632', '正在入住'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海景观景房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'charlie'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3) ORDER BY room_number FETCH FIRST 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'charlie'),
-        TRUNC(SYSDATE) + 15 + 15/24, TRUNC(SYSDATE) + 17 + 12/24,
-        'REFUNDED', 2, 1796.40, 1996.00, 199.60, 1796.40, 0.00, 0.90,
-        'REFUNDED', 'ONLINE', 'VISA', 'CNY', '查理', '13698745632', '已全额退款',
-        '行程变更，需要退款', TRUNC(SYSDATE) + 10, TRUNC(SYSDATE) + 11, NULL,
-        (SELECT id FROM users WHERE username = 'admin' FETCH FIRST 1 ROWS ONLY));
+-- 8
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) - 30 + 15/24, TRUNC(SYSDATE) - 27 + 12/24,
+       'CHECKED_OUT', 2, 3611.52, 4104.00, 492.48, 3611.52, 3611.52, 0.88,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '查理', '13698745632', '纪念日入住'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海天云顶套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'charlie'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2) ORDER BY room_number OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'diana'),
-        TRUNC(SYSDATE) + 10 + 15/24, TRUNC(SYSDATE) + 13 + 12/24,
-        'PENDING', 3, 1881.36, 1980.00, 98.64, 1881.36, 0.00, 0.95,
-        'UNPAID', NULL, NULL, 'CNY', '戴安娜', '18611223344', '需要婴儿床围栏',
-        NULL, NULL, NULL, NULL, NULL);
+-- 9
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark, refund_reason, refund_requested_at, refund_approved_at, refund_approved_by)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 15 + 15/24, TRUNC(SYSDATE) + 17 + 12/24,
+       'REFUNDED', 2, 1796.40, 1996.00, 199.60, 1796.40, 0.00, 0.90,
+       'REFUNDED', 'ONLINE', 'VISA', 'CNY', '查理', '13698745632', '已全额退款',
+       '行程变更，需要退款', TRUNC(SYSDATE) + 10, TRUNC(SYSDATE) + 11,
+       (SELECT id FROM users WHERE username = 'admin' FETCH FIRST 1 ROWS ONLY)
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖私汤大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'charlie'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1) ORDER BY room_number OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'diana'),
-        TRUNC(SYSDATE) + 1 + 15/24, TRUNC(SYSDATE) + 3 + 12/24,
-        'CONFIRMED', 2, 1079.20, 1136.00, 56.80, 1079.20, 1079.20, 0.95,
-        'PAID', 'ONLINE', 'ALIPAY', 'CNY', '戴安娜', '18611223344', '提前安排婴儿床',
-        NULL, NULL, NULL, NULL, NULL);
+-- 10
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 10 + 15/24, TRUNC(SYSDATE) + 13 + 12/24,
+       'PENDING', 3, 1881.36, 1980.00, 98.64, 1881.36, 0.00, 0.95,
+       'UNPAID', 'CNY', '戴安娜', '18611223344', '需要婴儿床围栏'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海豚家庭主题房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'diana'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3) ORDER BY room_number FETCH FIRST 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'diana'),
-        TRUNC(SYSDATE) + 20 + 15/24, TRUNC(SYSDATE) + 23 + 12/24,
-        'PENDING_CONFIRMATION', 2, 4525.80, 4764.00, 238.20, 4525.80, 0.00, 0.95,
-        'UNPAID', NULL, NULL, 'CNY', '戴安娜', '18611223344', '等待酒店确认禅修课程',
-        NULL, NULL, NULL, NULL, NULL);
+-- 11
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 1 + 15/24, TRUNC(SYSDATE) + 3 + 12/24,
+       'CONFIRMED', 2, 1079.20, 1136.00, 56.80, 1079.20, 1079.20, 0.95,
+       'PAID', 'ONLINE', 'ALIPAY', 'CNY', '戴安娜', '18611223344', '提前安排婴儿床'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河行政大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'diana'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1) ORDER BY room_number OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'bob'),
-        TRUNC(SYSDATE) + 8 + 15/24, TRUNC(SYSDATE) + 10 + 12/24,
-        'PENDING', 2, 936.00, 936.00, 0.00, 936.00, 0.00, 1.00,
-        'UNPAID', NULL, NULL, 'CNY', '鲍勃', '15987654321', '商务出差预订',
-        NULL, NULL, NULL, NULL, NULL);
+-- 12
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 20 + 15/24, TRUNC(SYSDATE) + 23 + 12/24,
+       'PENDING_CONFIRMATION', 2, 4525.80, 4764.00, 238.20, 4525.80, 0.00, 0.95,
+       'UNPAID', 'CNY', '戴安娜', '18611223344', '等待酒店确认禅修课程'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖禅意套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'diana'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3) ORDER BY room_number OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'alice'),
-        TRUNC(SYSDATE) + 30 + 15/24, TRUNC(SYSDATE) + 32 + 12/24,
-        'CONFIRMED', 2, 1896.40, 1996.00, 99.60, 1896.40, 1896.40, 0.95,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '温泉放松',
-        NULL, NULL, NULL, NULL, NULL);
+-- 13
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 8 + 15/24, TRUNC(SYSDATE) + 10 + 12/24,
+       'PENDING', 2, 936.00, 936.00, 0.00, 936.00, 0.00, 1.00,
+       'UNPAID', 'CNY', '鲍勃', '15987654321', '商务出差预订'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河城市景观房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'bob'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3) ORDER BY room_number OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'mia'),
-        TRUNC(SYSDATE) + 2 + 14/24, TRUNC(SYSDATE) + 4 + 11/24,
-        'CONFIRMED', 4, 2292.64, 2576.00, 283.36, 2292.64, 2292.64, 0.89,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '米娅', '15712348765', '需要安排烧烤食材',
-        NULL, NULL, NULL, NULL, NULL);
+-- 14
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 30 + 15/24, TRUNC(SYSDATE) + 32 + 12/24,
+       'CONFIRMED', 2, 1896.40, 1996.00, 99.60, 1896.40, 1896.40, 0.95,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '温泉放松'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖私汤大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'alice'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1) ORDER BY room_number OFFSET 5 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'mia'),
-        TRUNC(SYSDATE) - 8 + 15/24, TRUNC(SYSDATE) - 6 + 12/24,
-        'CHECKED_OUT', 2, 870.48, 936.00, 65.52, 870.48, 870.48, 0.93,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '米娅', '15712348765', '城市漫步住宿',
-        NULL, NULL, NULL, NULL, NULL);
+-- 15
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 2 + 14/24, TRUNC(SYSDATE) + 4 + 11/24,
+       'CONFIRMED', 4, 2292.64, 2576.00, 283.36, 2292.64, 2292.64, 0.89,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '米娅', '15712348765', '需要安排烧烤食材'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖森林木屋' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'mia'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2) ORDER BY room_number OFFSET 5 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'mia'),
-        TRUNC(SYSDATE) + 7 + 15/24, TRUNC(SYSDATE) + 10 + 12/24,
-        'REFUNDED', 3, 1878.24, 2064.00, 185.76, 1878.24, 0.00, 0.91,
-        'REFUNDED', 'ONLINE', 'WECHAT', 'CNY', '米娅', '15712348765', '因行程变动退款',
-        '孩子生病，无法出行', TRUNC(SYSDATE) + 7 - 10, TRUNC(SYSDATE) + 7 - 9, NULL,
-        (SELECT id FROM users WHERE username = 'admin' FETCH FIRST 1 ROWS ONLY));
+-- 16
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) - 8 + 15/24, TRUNC(SYSDATE) - 6 + 12/24,
+       'CHECKED_OUT', 2, 870.48, 936.00, 65.52, 870.48, 870.48, 0.93,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '米娅', '15712348765', '城市漫步住宿'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河城市景观房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'mia'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1) ORDER BY room_number OFFSET 7 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'nina'),
-        TRUNC(SYSDATE) + 6 + 15/24, TRUNC(SYSDATE) + 8 + 12/24,
-        'PENDING', 1, 936.00, 936.00, 0.00, 936.00, 0.00, 1.00,
-        'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '妮娜', '13698761234', '首次入住体验',
-        NULL, NULL, NULL, NULL, NULL);
+-- 17
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark, refund_reason, refund_requested_at, refund_approved_at, refund_approved_by)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 7 + 15/24, TRUNC(SYSDATE) + 10 + 12/24,
+       'REFUNDED', 3, 1878.24, 2064.00, 185.76, 1878.24, 0.00, 0.91,
+       'REFUNDED', 'ONLINE', 'WECHAT', 'CNY', '米娅', '15712348765', '因行程变动退款',
+       '孩子生病，无法出行', TRUNC(SYSDATE) + 7 - 10, TRUNC(SYSDATE) + 7 - 9,
+       (SELECT id FROM users WHERE username = 'admin' FETCH FIRST 1 ROWS ONLY)
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海豚家庭主题房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'mia'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3) ORDER BY room_number OFFSET 5 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'nina'),
-        TRUNC(SYSDATE) - 5 + 15/24, TRUNC(SYSDATE) - 3 + 12/24,
-        'CHECKED_OUT', 1, 1996.00, 1996.00, 0.00, 1996.00, 1996.00, 1.00,
-        'PAID', 'DIRECT', 'ARRIVAL', 'CNY', '妮娜', '13698761234', '温泉放松',
-        NULL, NULL, NULL, NULL, NULL);
+-- 18
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 6 + 15/24, TRUNC(SYSDATE) + 8 + 12/24,
+       'PENDING', 1, 936.00, 936.00, 0.00, 936.00, 0.00, 1.00,
+       'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '妮娜', '13698761234', '首次入住体验'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河城市景观房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'nina'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2) ORDER BY room_number OFFSET 3 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'oscar'),
-        TRUNC(SYSDATE) + 4 + 15/24, TRUNC(SYSDATE) + 6 + 12/24,
-        'PENDING_PAYMENT', 2, 1556.64, 1656.00, 99.36, 1556.64, 0.00, 0.94,
-        'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '奥斯卡', '18623456789', '等待公司审批付款',
-        NULL, NULL, NULL, NULL, NULL);
+-- 19
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) - 5 + 15/24, TRUNC(SYSDATE) - 3 + 12/24,
+       'CHECKED_OUT', 1, 1996.00, 1996.00, 0.00, 1996.00, 1996.00, 1.00,
+       'PAID', 'DIRECT', 'ARRIVAL', 'CNY', '妮娜', '13698761234', '温泉放松'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖私汤大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'nina'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2) ORDER BY room_number OFFSET 6 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'oscar'),
-        TRUNC(SYSDATE) - 3 + 15/24, TRUNC(SYSDATE) - 1 + 12/24,
-        'CONFIRMED', 3, 1320.96, 1376.00, 55.04, 1320.96, 1320.96, 0.96,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '奥斯卡', '18623456789', '家庭周末短途游',
-        NULL, NULL, NULL, NULL, NULL);
+-- 20
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 4 + 15/24, TRUNC(SYSDATE) + 6 + 12/24,
+       'PENDING_PAYMENT', 2, 1556.64, 1656.00, 99.36, 1556.64, 0.00, 0.94,
+       'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '奥斯卡', '18623456789', '等待公司审批付款'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海景观景房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'oscar'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1) ORDER BY room_number OFFSET 4 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'paul'),
-        TRUNC(SYSDATE) + 9 + 15/24, TRUNC(SYSDATE) + 11 + 12/24,
-        'PENDING_CONFIRMATION', 2, 1022.40, 1136.00, 113.60, 1022.40, 0.00, 0.90,
-        'UNPAID', 'ONLINE', 'VISA', 'CNY', '保罗', '13787654321', '等待公司批准',
-        NULL, NULL, NULL, NULL, NULL);
+-- 21
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) - 3 + 15/24, TRUNC(SYSDATE) - 1 + 12/24,
+       'CONFIRMED', 3, 1320.96, 1376.00, 55.04, 1320.96, 1320.96, 0.96,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '奥斯卡', '18623456789', '家庭周末短途游'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海豚家庭主题房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'oscar'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3) ORDER BY room_number OFFSET 2 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'paul'),
-        TRUNC(SYSDATE) - 18 + 15/24, TRUNC(SYSDATE) - 15 + 12/24,
-        'CHECKED_OUT', 3, 3438.96, 3864.00, 425.04, 3438.96, 3438.96, 0.89,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '保罗', '13787654321', '团队建设活动',
-        NULL, NULL, NULL, NULL, NULL);
+-- 22
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 9 + 15/24, TRUNC(SYSDATE) + 11 + 12/24,
+       'PENDING_CONFIRMATION', 2, 1022.40, 1136.00, 113.60, 1022.40, 0.00, 0.90,
+       'UNPAID', 'ONLINE', 'VISA', 'CNY', '保罗', '13787654321', '等待公司批准'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河行政大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'paul'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3) ORDER BY room_number OFFSET 2 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'quinn'),
-        TRUNC(SYSDATE) + 3 + 15/24, TRUNC(SYSDATE) + 5 + 12/24,
-        'CHECKED_IN', 2, 2699.60, 3176.00, 476.40, 2699.60, 2699.60, 0.85,
-        'PAID', 'DIRECT', 'MANUAL', 'CNY', '奎恩', '15876543210', '参加VIP沙龙',
-        NULL, NULL, NULL, NULL, NULL);
+-- 23
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) - 18 + 15/24, TRUNC(SYSDATE) - 15 + 12/24,
+       'CHECKED_OUT', 3, 3438.96, 3864.00, 425.04, 3438.96, 3438.96, 0.89,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '保罗', '13787654321', '团队建设活动'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖森林木屋' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'paul'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2) ORDER BY room_number OFFSET 3 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'quinn'),
-        TRUNC(SYSDATE) + 14 + 15/24, TRUNC(SYSDATE) + 17 + 12/24,
-        'REFUNDED', 3, 3488.40, 4104.00, 615.60, 3488.40, 0.00, 0.85,
-        'REFUNDED', 'ONLINE', 'VISA', 'CNY', '奎恩', '15876543210', '改期至明年',
-        '计划变更，改期至明年同期', TRUNC(SYSDATE) + 14 - 7, TRUNC(SYSDATE) + 14 - 6, NULL,
-        (SELECT id FROM users WHERE username = 'admin' FETCH FIRST 1 ROWS ONLY));
+-- 24
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 3 + 15/24, TRUNC(SYSDATE) + 5 + 12/24,
+       'CHECKED_IN', 2, 2699.60, 3176.00, 476.40, 2699.60, 2699.60, 0.85,
+       'PAID', 'DIRECT', 'MANUAL', 'CNY', '奎恩', '15876543210', '参加VIP沙龙'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖禅意套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'quinn'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2) ORDER BY room_number OFFSET 4 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'rachel'),
-        TRUNC(SYSDATE) + 8 + 15/24, TRUNC(SYSDATE) + 10 + 12/24,
-        'CONFIRMED', 2, 2243.52, 2736.00, 492.48, 2243.52, 2243.52, 0.82,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '瑞秋', '13598761234', '享受钻石专属权益',
-        NULL, NULL, NULL, NULL, NULL);
+-- 25
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark, refund_reason, refund_requested_at, refund_approved_at, refund_approved_by)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 14 + 15/24, TRUNC(SYSDATE) + 17 + 12/24,
+       'REFUNDED', 3, 3488.40, 4104.00, 615.60, 3488.40, 0.00, 0.85,
+       'REFUNDED', 'ONLINE', 'VISA', 'CNY', '奎恩', '15876543210', '改期至明年',
+       '计划变更，改期至明年同期', TRUNC(SYSDATE) + 14 - 7, TRUNC(SYSDATE) + 14 - 6,
+       (SELECT id FROM users WHERE username = 'admin' FETCH FIRST 1 ROWS ONLY)
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海天云顶套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'quinn'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖禅意套房' AND hotel_id = 3) ORDER BY room_number OFFSET 3 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'rachel'),
-        TRUNC(SYSDATE) + 26 + 15/24, TRUNC(SYSDATE) + 29 + 12/24,
-        'PENDING', 2, 4001.76, 4764.00, 762.24, 4001.76, 0.00, 0.84,
-        'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '瑞秋', '13598761234', '等待确认私教禅修大师',
-        NULL, NULL, NULL, NULL, NULL);
+-- 26
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 8 + 15/24, TRUNC(SYSDATE) + 10 + 12/24,
+       'CONFIRMED', 2, 2243.52, 2736.00, 492.48, 2243.52, 2243.52, 0.82,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '瑞秋', '13598761234', '享受钻石专属权益'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海天云顶套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'rachel'
+  AND ROWNUM = 1;
 
--- 额外预订记录
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1) ORDER BY room_number OFFSET 5 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'alice'),
-        TRUNC(SYSDATE) + 2 + 13/24, TRUNC(SYSDATE) + 4 + 11/24,
-        'CONFIRMED', 2, 1045.12, 1136.00, 90.88, 1045.12, 1045.12, 0.92,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '行政房额外预订',
-        NULL, NULL, NULL, NULL, NULL);
+-- 27
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 26 + 15/24, TRUNC(SYSDATE) + 29 + 12/24,
+       'PENDING', 2, 4001.76, 4764.00, 762.24, 4001.76, 0.00, 0.84,
+       'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '瑞秋', '13598761234', '等待确认私教禅修大师'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖禅意套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'rachel'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河行政大床房' AND hotel_id = 1) ORDER BY room_number OFFSET 6 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'bob'),
-        TRUNC(SYSDATE) + 6 + 16/24, TRUNC(SYSDATE) + 9 + 11/24,
-        'PENDING_CONFIRMATION', 2, 1618.80, 1704.00, 85.20, 1618.80, 0.00, 0.95,
-        'UNPAID', 'ONLINE', 'ALIPAY', 'CNY', '鲍勃', '15987654321', '等待审批确认',
-        NULL, NULL, NULL, NULL, NULL);
+-- 28
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 2 + 13/24, TRUNC(SYSDATE) + 4 + 11/24,
+       'CONFIRMED', 2, 1045.12, 1136.00, 90.88, 1045.12, 1045.12, 0.92,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '行政房额外预订'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河行政大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'alice'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1) ORDER BY room_number OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'charlie'),
-        TRUNC(SYSDATE) + 4 + 14/24, TRUNC(SYSDATE) + 7 + 11/24,
-        'REFUND_REQUESTED', 4, 2138.40, 2376.00, 237.60, 2138.40, 2138.40, 0.90,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '查理', '13698745632', '家庭旅行预订',
-        '家中有急事，需要退款', TRUNC(SYSDATE) - 1, NULL, NULL, NULL);
+-- 29
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 6 + 16/24, TRUNC(SYSDATE) + 9 + 11/24,
+       'PENDING_CONFIRMATION', 2, 1618.80, 1704.00, 85.20, 1618.80, 0.00, 0.95,
+       'UNPAID', 'ONLINE', 'ALIPAY', 'CNY', '鲍勃', '15987654321', '等待审批确认'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河行政大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'bob'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河家庭套房' AND hotel_id = 1) ORDER BY room_number OFFSET 2 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'nina'),
-        TRUNC(SYSDATE) + 1 + 12/24, TRUNC(SYSDATE) + 3 + 10/24,
-        'CHECKED_IN', 4, 1140.48, 1188.00, 47.52, 1140.48, 1140.48, 0.96,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '妮娜', '13698761234', '家庭入住中',
-        NULL, NULL, NULL, NULL, NULL);
+-- 30
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark, refund_reason, refund_requested_at)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 4 + 14/24, TRUNC(SYSDATE) + 7 + 11/24,
+       'REFUND_REQUESTED', 4, 2138.40, 2376.00, 237.60, 2138.40, 2138.40, 0.90,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '查理', '13698745632', '家庭旅行预订',
+       '家中有急事，需要退款', TRUNC(SYSDATE) - 1
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河家庭套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'charlie'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1) ORDER BY room_number OFFSET 8 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'oscar'),
-        TRUNC(SYSDATE) + 5 + 15/24, TRUNC(SYSDATE) + 7 + 12/24,
-        'CONFIRMED', 2, 842.40, 936.00, 93.60, 842.40, 842.40, 0.90,
-        'PAID', 'ONLINE', 'WECHAT', 'CNY', '奥斯卡', '18623456789', '城景房要求高楼层',
-        NULL, NULL, NULL, NULL, NULL);
+-- 31
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 1 + 12/24, TRUNC(SYSDATE) + 3 + 10/24,
+       'CHECKED_IN', 4, 1140.48, 1188.00, 47.52, 1140.48, 1140.48, 0.96,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '妮娜', '13698761234', '家庭入住中'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河家庭套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'nina'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 1,
-        (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '星河城市景观房' AND hotel_id = 1) ORDER BY room_number OFFSET 9 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'paul'),
-        TRUNC(SYSDATE) + 10 + 17/24, TRUNC(SYSDATE) + 13 + 11/24,
-        'PENDING_CONFIRMATION', 2, 1333.80, 1404.00, 70.20, 1333.80, 0.00, 0.95,
-        'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '保罗', '13787654321', '等待出差审批',
-        NULL, NULL, NULL, NULL, NULL);
+-- 32
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 5 + 15/24, TRUNC(SYSDATE) + 7 + 12/24,
+       'CONFIRMED', 2, 842.40, 936.00, 93.60, 842.40, 842.40, 0.90,
+       'PAID', 'ONLINE', 'WECHAT', 'CNY', '奥斯卡', '18623456789', '城景房要求高楼层'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河城市景观房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'oscar'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2) ORDER BY room_number OFFSET 4 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'quinn'),
-        TRUNC(SYSDATE) + 2 + 15/24, TRUNC(SYSDATE) + 5 + 12/24,
-        'CHECKED_IN', 2, 1457.28, 1656.00, 198.72, 1457.28, 1457.28, 0.88,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '奎恩', '15876543210', '已办理入住',
-        NULL, NULL, NULL, NULL, NULL);
+-- 33
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 10 + 17/24, TRUNC(SYSDATE) + 13 + 11/24,
+       'PENDING_CONFIRMATION', 2, 1333.80, 1404.00, 70.20, 1333.80, 0.00, 0.95,
+       'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '保罗', '13787654321', '等待出差审批'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '星河国际大酒店'
+  AND rt.name = '星河城市景观房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'paul'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海景观景房' AND hotel_id = 2) ORDER BY room_number OFFSET 5 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'rachel'),
-        TRUNC(SYSDATE) + 11 + 15/24, TRUNC(SYSDATE) + 14 + 12/24,
-        'CONFIRMED', 2, 2111.40, 2484.00, 372.60, 2111.40, 2111.40, 0.85,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '瑞秋', '13598761234', '安排晚间甜品',
-        NULL, NULL, NULL, NULL, NULL);
+-- 34
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 2 + 15/24, TRUNC(SYSDATE) + 5 + 12/24,
+       'CHECKED_IN', 2, 1457.28, 1656.00, 198.72, 1457.28, 1457.28, 0.88,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '奎恩', '15876543210', '已办理入住'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海景观景房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'quinn'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2) ORDER BY room_number OFFSET 7 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'diana'),
-        TRUNC(SYSDATE) + 3 + 14/24, TRUNC(SYSDATE) + 6 + 11/24,
-        'CONFIRMED', 3, 1238.40, 1376.00, 137.60, 1238.40, 1238.40, 0.90,
-        'PAID', 'ONLINE', 'WECHAT', 'CNY', '戴安娜', '18611223344', '亲子活动预订成功',
-        NULL, NULL, NULL, NULL, NULL);
+-- 35
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 11 + 15/24, TRUNC(SYSDATE) + 14 + 12/24,
+       'CONFIRMED', 2, 2111.40, 2484.00, 372.60, 2111.40, 2111.40, 0.85,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '瑞秋', '13598761234', '安排晚间甜品'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海景观景房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'rachel'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海豚家庭主题房' AND hotel_id = 2) ORDER BY room_number OFFSET 8 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'mia'),
-        TRUNC(SYSDATE) + 8 + 16/24, TRUNC(SYSDATE) + 10 + 12/24,
-        'PENDING_PAYMENT', 4, 1307.20, 1376.00, 68.80, 1307.20, 0.00, 0.95,
-        'UNPAID', 'WALLET', 'WALLET', 'CNY', '米娅', '15712348765', '等待余额支付',
-        NULL, NULL, NULL, NULL, NULL);
+-- 36
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 3 + 14/24, TRUNC(SYSDATE) + 6 + 11/24,
+       'CONFIRMED', 3, 1238.40, 1376.00, 137.60, 1238.40, 1238.40, 0.90,
+       'PAID', 'ONLINE', 'WECHAT', 'CNY', '戴安娜', '18611223344', '亲子活动预订成功'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海豚家庭主题房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'diana'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 2,
-        (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '海天云顶套房' AND hotel_id = 2) ORDER BY room_number OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'leo'),
-        TRUNC(SYSDATE) + 1 + 15/24, TRUNC(SYSDATE) + 3 + 12/24,
-        'CONFIRMED', 2, 2407.68, 2736.00, 328.32, 2407.68, 2407.68, 0.88,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '里奥', '13712349876', '预约私人管家服务',
-        NULL, NULL, NULL, NULL, NULL);
+-- 37
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 8 + 16/24, TRUNC(SYSDATE) + 10 + 12/24,
+       'PENDING_PAYMENT', 4, 1307.20, 1376.00, 68.80, 1307.20, 0.00, 0.95,
+       'UNPAID', 'WALLET', 'WALLET', 'CNY', '米娅', '15712348765', '等待余额支付'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海豚家庭主题房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'mia'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3) ORDER BY room_number OFFSET 6 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'alice'),
-        TRUNC(SYSDATE) + 4 + 15/24, TRUNC(SYSDATE) + 6 + 12/24,
-        'CONFIRMED', 2, 1796.40, 1996.00, 199.60, 1796.40, 1796.40, 0.90,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '温泉体验已预订',
-        NULL, NULL, NULL, NULL, NULL);
+-- 38
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 1 + 15/24, TRUNC(SYSDATE) + 3 + 12/24,
+       'CONFIRMED', 2, 2407.68, 2736.00, 328.32, 2407.68, 2407.68, 0.88,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '里奥', '13712349876', '预约私人管家服务'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '海滩假日酒店'
+  AND rt.name = '海天云顶套房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'leo'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3) ORDER BY room_number OFFSET 3 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'bob'),
-        TRUNC(SYSDATE) + 2 + 14/24, TRUNC(SYSDATE) + 4 + 12/24,
-        'CHECKED_IN', 4, 2318.40, 2576.00, 257.60, 2318.40, 2318.40, 0.90,
-        'PAID', 'DIRECT', 'ARRIVAL', 'CNY', '鲍勃', '15987654321', '木屋体验中',
-        NULL, NULL, NULL, NULL, NULL);
+-- 39
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 4 + 15/24, TRUNC(SYSDATE) + 6 + 12/24,
+       'CONFIRMED', 2, 1796.40, 1996.00, 199.60, 1796.40, 1796.40, 0.90,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '温泉体验已预订'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖私汤大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'alice'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖森林木屋' AND hotel_id = 3) ORDER BY room_number OFFSET 4 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'paul'),
-        TRUNC(SYSDATE) + 9 + 15/24, TRUNC(SYSDATE) + 12 + 12/24,
-        'CONFIRMED', 3, 3554.88, 3864.00, 309.12, 3554.88, 3554.88, 0.92,
-        'PAID', 'WALLET', 'WALLET', 'CNY', '保罗', '13787654321', '团队秋游，包栋木屋',
-        NULL, NULL, NULL, NULL, NULL);
+-- 40
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 2 + 14/24, TRUNC(SYSDATE) + 4 + 12/24,
+       'CHECKED_IN', 4, 2318.40, 2576.00, 257.60, 2318.40, 2318.40, 0.90,
+       'PAID', 'DIRECT', 'ARRIVAL', 'CNY', '鲍勃', '15987654321', '木屋体验中'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖森林木屋' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'bob'
+  AND ROWNUM = 1;
 
-INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests,
-                      amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate,
-                      payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark,
-                      refund_reason, refund_requested_at, refund_approved_at, refund_rejected_at, refund_approved_by)
-VALUES (seq_bookings.NEXTVAL, 3,
-        (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3 FETCH FIRST 1 ROWS ONLY),
-        (SELECT id FROM (SELECT id FROM room WHERE room_type_id = (SELECT id FROM room_type WHERE name = '云栖私汤大床房' AND hotel_id = 3) ORDER BY room_number OFFSET 7 ROWS FETCH NEXT 1 ROWS ONLY)),
-        (SELECT id FROM users WHERE username = 'quinn'),
-        TRUNC(SYSDATE) + 7 + 16/24, TRUNC(SYSDATE) + 9 + 12/24,
-        'PENDING_CONFIRMATION', 2, 1856.28, 1996.00, 139.72, 1856.28, 0.00, 0.93,
-        'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '奎恩', '15876543210', '等待确认温泉时间',
-        NULL, NULL, NULL, NULL, NULL);
+-- 41
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 9 + 15/24, TRUNC(SYSDATE) + 12 + 12/24,
+       'CONFIRMED', 3, 3554.88, 3864.00, 309.12, 3554.88, 3554.88, 0.92,
+       'PAID', 'WALLET', 'WALLET', 'CNY', '保罗', '13787654321', '团队秋游，包栋木屋'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖森林木屋' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'paul'
+  AND ROWNUM = 1;
 
+-- 42
+INSERT INTO bookings (hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
+SELECT h.id, rt.id, r.id, u.id,
+       TRUNC(SYSDATE) + 7 + 16/24, TRUNC(SYSDATE) + 9 + 12/24,
+       'PENDING_CONFIRMATION', 2, 1856.28, 1996.00, 139.72, 1856.28, 0.00, 0.93,
+       'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '奎恩', '15876543210', '等待确认温泉时间'
+FROM hotel h, room_type rt, room r, users u
+WHERE h.name = '云栖温泉度假酒店'
+  AND rt.name = '云栖私汤大床房' AND rt.hotel_id = h.id
+  AND r.room_type_id = rt.id
+  AND u.username = 'quinn'
+  AND ROWNUM = 1;
+
+-- ============================================================================
 -- 更新房间状态
-UPDATE room r
-SET status = CASE
-                 WHEN EXISTS (SELECT 1 FROM room_maintenance m WHERE m.room_id = r.id AND m.status = 1) THEN 5
-                 WHEN EXISTS (SELECT 1 FROM bookings b WHERE b.room_id = r.id AND b.status = 'CHECKED_IN') THEN 3
-                 WHEN EXISTS (SELECT 1 FROM bookings b WHERE b.room_id = r.id AND b.status IN ('PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT','CONFIRMED')) THEN 2
-                 ELSE 1
-             END;
+-- ============================================================================
+UPDATE room r SET status = CASE
+    WHEN EXISTS (SELECT 1 FROM room_maintenance m WHERE m.room_id = r.id AND m.status = 1) THEN 5
+    WHEN EXISTS (SELECT 1 FROM bookings b WHERE b.room_id = r.id AND b.status = 'CHECKED_IN') THEN 3
+    WHEN EXISTS (SELECT 1 FROM bookings b WHERE b.room_id = r.id AND b.status IN ('PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT','CONFIRMED')) THEN 2
+    ELSE 1
+END;
 
-UPDATE room r
-SET last_checkout_time = (
-    SELECT MAX(b.end_time)
-    FROM bookings b
+UPDATE room r SET last_checkout_time = (
+    SELECT MAX(b.end_time) FROM bookings b
     WHERE b.room_id = r.id AND b.status = 'CHECKED_OUT'
 )
 WHERE EXISTS (SELECT 1 FROM bookings b WHERE b.room_id = r.id AND b.status = 'CHECKED_OUT');
 
-UPDATE room_type rt
-SET available_count = (
+UPDATE room_type rt SET available_count = (
     SELECT COUNT(*) FROM room r WHERE r.room_type_id = rt.id AND r.status = 1
 );
 
 COMMIT;
 
--- 视图 -----------------------------------------------------------------
--- 酒店房型可用性概览视图
-CREATE OR REPLACE VIEW hotel_user.v_hotel_room_availability AS
+-- ============================================================================
+-- 视图（普通视图 + 物化视图）
+-- ============================================================================
+CREATE OR REPLACE VIEW v_hotel_room_availability AS
 SELECT
     h.id AS hotel_id,
     h.name AS hotel_name,
@@ -1362,14 +1395,12 @@ SELECT
     rt.total_count,
     rt.available_count,
     rt.is_active,
-    (SELECT COUNT(*) FROM hotel_user.room r WHERE r.room_type_id = rt.id AND r.status = 1) AS actual_vacant_rooms
-FROM hotel_user.hotel h
-JOIN hotel_user.room_type rt ON rt.hotel_id = h.id
+    (SELECT COUNT(*) FROM room r WHERE r.room_type_id = rt.id AND r.status = 1) AS actual_vacant_rooms
+FROM hotel h
+JOIN room_type rt ON rt.hotel_id = h.id
 WHERE rt.is_active = 1;
-COMMENT ON TABLE hotel_user.v_hotel_room_availability IS '酒店房型可用性概览视图';
 
--- 用户VIP会员信息视图（含等级权益）
-CREATE OR REPLACE VIEW hotel_user.v_user_vip_info AS
+CREATE OR REPLACE VIEW v_user_vip_info AS
 SELECT
     u.id AS user_id,
     u.username,
@@ -1379,12 +1410,16 @@ SELECT
     v.checkout_hour,
     u.total_consumption,
     u.status
-FROM hotel_user.users u
-JOIN hotel_user.vip_level_policy v ON v.vip_level = u.vip_level;
-COMMENT ON TABLE hotel_user.v_user_vip_info IS '用户VIP会员信息视图（含等级权益）';
+FROM users u
+JOIN vip_level_policy v ON v.vip_level = u.vip_level;
 
--- 每日预订统计视图（按酒店和日期）
-CREATE OR REPLACE VIEW hotel_user.v_daily_booking_stats AS
+-- 物化视图日志
+CREATE MATERIALIZED VIEW LOG ON bookings WITH ROWID, PRIMARY KEY (hotel_id, start_time, status, amount) INCLUDING NEW VALUES;
+
+-- 物化视图：每日预订统计（每天全量刷新）
+CREATE MATERIALIZED VIEW mv_daily_booking_stats
+REFRESH COMPLETE ON DEMAND
+AS
 SELECT
     h.id AS hotel_id,
     h.name AS hotel_name,
@@ -1393,70 +1428,53 @@ SELECT
     SUM(CASE WHEN b.status IN ('CONFIRMED','CHECKED_IN','CHECKED_OUT') THEN 1 ELSE 0 END) AS confirmed_bookings,
     SUM(CASE WHEN b.status = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled_bookings,
     SUM(b.amount) AS total_revenue
-FROM hotel_user.hotel h
-LEFT JOIN hotel_user.bookings b ON b.hotel_id = h.id
+FROM hotel h
+LEFT JOIN bookings b ON b.hotel_id = h.id
 GROUP BY h.id, h.name, TRUNC(b.start_time);
-COMMENT ON TABLE hotel_user.v_daily_booking_stats IS '每日预订统计视图';
 
--- 触发器 -----------------------------------------------------------------
--- 预订状态变更时自动同步房间状态
-CREATE OR REPLACE TRIGGER hotel_user.trg_booking_status_update
-AFTER UPDATE OF status ON hotel_user.bookings
+-- 保留原始视图定义
+CREATE OR REPLACE VIEW v_daily_booking_stats AS SELECT * FROM mv_daily_booking_stats;
+
+-- ============================================================================
+-- 触发器
+-- ============================================================================
+
+-- 预订状态变更同步房间状态
+CREATE OR REPLACE TRIGGER trg_booking_status_update
+AFTER UPDATE OF status ON bookings
 FOR EACH ROW
-DECLARE
-    v_room_status NUMBER(3);
 BEGIN
-    -- 当预订状态变为CHECKED_IN时，设置房间状态为3（已入住）
     IF :NEW.status = 'CHECKED_IN' THEN
-        UPDATE hotel_user.room
-        SET status = 3,
-            updated_time = SYSDATE
-        WHERE id = :NEW.room_id;
-    -- 当预订状态变为CHECKED_OUT时，设置房间状态为1（空闲）并记录最后退房时间
+        UPDATE room SET status = 3, updated_time = SYSDATE WHERE id = :NEW.room_id;
     ELSIF :NEW.status = 'CHECKED_OUT' THEN
-        UPDATE hotel_user.room
-        SET status = 1,
-            last_checkout_time = SYSDATE,
-            updated_time = SYSDATE
-        WHERE id = :NEW.room_id;
-    -- 当预订被取消或退款时，恢复房间状态为1（空闲），但需确保没有其他有效预订存在
+        UPDATE room SET status = 1, last_checkout_time = SYSDATE, updated_time = SYSDATE WHERE id = :NEW.room_id;
     ELSIF :NEW.status IN ('CANCELLED', 'REFUNDED') THEN
-        -- 检查是否存在其他有效预订（已入住或未来）
         DECLARE
             v_other_bookings NUMBER;
         BEGIN
-            SELECT COUNT(*)
-            INTO v_other_bookings
-            FROM hotel_user.bookings
-            WHERE room_id = :NEW.room_id
-              AND id != :NEW.id
-              AND status IN ('CONFIRMED', 'CHECKED_IN', 'PENDING', 'PENDING_CONFIRMATION', 'PENDING_PAYMENT');
+            SELECT COUNT(*) INTO v_other_bookings FROM bookings
+            WHERE room_id = :NEW.room_id AND id != :NEW.id
+              AND status IN ('CONFIRMED','CHECKED_IN','PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT');
             IF v_other_bookings = 0 THEN
-                UPDATE hotel_user.room
-                SET status = 1,
-                    updated_time = SYSDATE
-                WHERE id = :NEW.room_id;
+                UPDATE room SET status = 1, updated_time = SYSDATE WHERE id = :NEW.room_id;
             END IF;
         END;
     END IF;
 END;
 /
 
--- 创建预订时自动减少房型可用数量（防止超订）
-CREATE OR REPLACE TRIGGER hotel_user.trg_booking_insert
-AFTER INSERT ON hotel_user.bookings
+-- 预订插入触发器：减少可用数量（防超卖）
+CREATE OR REPLACE TRIGGER trg_booking_insert
+AFTER INSERT ON bookings
 FOR EACH ROW
 DECLARE
     v_available_count NUMBER;
 BEGIN
-    -- 仅对需要占用房间的预订状态生效
-    IF :NEW.status IN ('PENDING', 'PENDING_CONFIRMATION', 'PENDING_PAYMENT', 'CONFIRMED', 'CHECKED_IN') THEN
-        -- 锁定房型行以避免并发问题
-        UPDATE hotel_user.room_type
+    IF :NEW.status IN ('PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT','CONFIRMED','CHECKED_IN') THEN
+        UPDATE room_type
         SET available_count = available_count - 1,
             updated_time = SYSDATE
-        WHERE id = :NEW.room_type_id
-          AND available_count > 0
+        WHERE id = :NEW.room_type_id AND available_count > 0
         RETURNING available_count INTO v_available_count;
 
         IF SQL%NOTFOUND THEN
@@ -1466,14 +1484,14 @@ BEGIN
 END;
 /
 
--- 取消或退款时恢复房型可用数量
-CREATE OR REPLACE TRIGGER hotel_user.trg_booking_cancel_refund
-AFTER UPDATE OF status ON hotel_user.bookings
+-- 取消/退款恢复可用数量
+CREATE OR REPLACE TRIGGER trg_booking_cancel_refund
+AFTER UPDATE OF status ON bookings
 FOR EACH ROW
 BEGIN
-    IF :OLD.status IN ('PENDING', 'PENDING_CONFIRMATION', 'PENDING_PAYMENT', 'CONFIRMED', 'CHECKED_IN')
-       AND :NEW.status IN ('CANCELLED', 'REFUNDED') THEN
-        UPDATE hotel_user.room_type
+    IF :OLD.status IN ('PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT','CONFIRMED','CHECKED_IN')
+       AND :NEW.status IN ('CANCELLED','REFUNDED') THEN
+        UPDATE room_type
         SET available_count = available_count + 1,
             updated_time = SYSDATE
         WHERE id = :NEW.room_type_id;
@@ -1481,14 +1499,13 @@ BEGIN
 END;
 /
 
--- 用户总消费额变更时自动更新VIP等级
-CREATE OR REPLACE TRIGGER hotel_user.trg_user_vip_upgrade
-AFTER UPDATE OF total_consumption ON hotel_user.users
+-- VIP 升级触发器
+CREATE OR REPLACE TRIGGER trg_user_vip_upgrade
+AFTER UPDATE OF total_consumption ON users
 FOR EACH ROW
 DECLARE
     v_new_level NUMBER(3);
 BEGIN
-    -- 根据总消费额确定VIP等级（阈值对应vip_level_policy表：level0=0, level1=5000, level2=15000, level3=30000, level4=50000）
     v_new_level := CASE
         WHEN :NEW.total_consumption >= 50000 THEN 4
         WHEN :NEW.total_consumption >= 30000 THEN 3
@@ -1497,17 +1514,17 @@ BEGIN
         ELSE 0
     END;
     IF v_new_level != :NEW.vip_level THEN
-        UPDATE hotel_user.users
-        SET vip_level = v_new_level,
-            updated_at = SYSDATE
-        WHERE id = :NEW.id;
+        UPDATE users SET vip_level = v_new_level, updated_at = SYSDATE WHERE id = :NEW.id;
     END IF;
 END;
 /
 
--- 存储过程 -----------------------------------------------------------------
--- 生成指定日期范围内的每日房间统计（写入vacancy_statistics表）
-CREATE OR REPLACE PROCEDURE hotel_user.generate_daily_stats(
+-- ============================================================================
+-- 存储过程与函数
+-- ============================================================================
+
+-- 生成指定日期范围内的每日房间统计
+CREATE OR REPLACE PROCEDURE generate_daily_stats(
     p_start_date DATE,
     p_end_date   DATE
 ) IS
@@ -1520,47 +1537,39 @@ CREATE OR REPLACE PROCEDURE hotel_user.generate_daily_stats(
     v_locked_rooms NUMBER;
     v_vacancy_rate NUMBER(5,4);
 BEGIN
-    -- 初始化日期
     v_stat_date := p_start_date;
 
-    -- 遍历日期（修复点）
     WHILE v_stat_date <= p_end_date LOOP
-
-        -- 遍历所有酒店-房型组合
         FOR rec IN (
             SELECT h.id AS hotel_id, rt.id AS room_type_id
-            FROM hotel_user.hotel h
-            JOIN hotel_user.room_type rt ON rt.hotel_id = h.id
+            FROM hotel h
+            JOIN room_type rt ON rt.hotel_id = h.id
             WHERE rt.is_active = 1
         ) LOOP
-
-            -- 统计房间状态数量（优化写法）
             SELECT 
                 COUNT(*),
                 SUM(CASE WHEN r.status = 1 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN r.status = 3 THEN 1 ELSE 0 END), -- 已入住
-                SUM(CASE WHEN r.status = 2 THEN 1 ELSE 0 END), -- 已预订
-                SUM(CASE WHEN r.status = 5 THEN 1 ELSE 0 END)  -- 维修中
+                SUM(CASE WHEN r.status = 3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN r.status = 2 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN r.status = 5 THEN 1 ELSE 0 END)
             INTO 
                 v_total_rooms, 
                 v_available_rooms, 
                 v_occupied_rooms, 
                 v_reserved_rooms, 
                 v_maintenance_rooms
-            FROM hotel_user.room r
+            FROM room r
             WHERE r.room_type_id = rec.room_type_id;
 
             v_locked_rooms := 0;
 
-            -- 空房率
             IF v_total_rooms > 0 THEN
                 v_vacancy_rate := v_available_rooms / v_total_rooms;
             ELSE
                 v_vacancy_rate := 0;
             END IF;
 
-            -- MERGE
-            MERGE INTO hotel_user.vacancy_statistics vs
+            MERGE INTO vacancy_statistics vs
             USING (
                 SELECT 
                     rec.hotel_id AS hid, 
@@ -1590,7 +1599,7 @@ BEGIN
                     updated_at = SYSDATE
             WHEN NOT MATCHED THEN
                 INSERT (
-                    id, hotel_id, room_type_id, stat_date, stat_hour,
+                    hotel_id, room_type_id, stat_date, stat_hour,
                     total_rooms, available_rooms,
                     occupied_rooms, reserved_rooms,
                     maintenance_rooms, locked_rooms,
@@ -1599,7 +1608,6 @@ BEGIN
                     created_at, updated_at
                 )
                 VALUES (
-                    seq_vacancy_statistics.NEXTVAL,
                     rec.hotel_id,
                     rec.room_type_id,
                     v_stat_date,
@@ -1620,9 +1628,7 @@ BEGIN
 
         END LOOP;
 
-        -- 日期递增（关键）
         v_stat_date := v_stat_date + 1;
-
     END LOOP;
 
     COMMIT;
@@ -1633,14 +1639,13 @@ BEGIN
         || ' 至 ' 
         || TO_CHAR(p_end_date, 'YYYY-MM-DD')
     );
-
 END generate_daily_stats;
 /
 
--- 执行月度VIP等级批量升级（基于年度总消费额）
-CREATE OR REPLACE PROCEDURE hotel_user.monthly_vip_upgrade IS
+-- 执行月度VIP等级批量升级
+CREATE OR REPLACE PROCEDURE monthly_vip_upgrade IS
     CURSOR c_user IS
-        SELECT id, total_consumption, vip_level FROM hotel_user.users;
+        SELECT id, total_consumption, vip_level FROM users;
 BEGIN
     FOR u IN c_user LOOP
         DECLARE
@@ -1654,7 +1659,7 @@ BEGIN
                 ELSE 0
             END;
             IF v_new_level != u.vip_level THEN
-                UPDATE hotel_user.users
+                UPDATE users
                 SET vip_level = v_new_level,
                     updated_at = SYSDATE
                 WHERE id = u.id;
@@ -1666,15 +1671,14 @@ BEGIN
 END monthly_vip_upgrade;
 /
 
--- 函数 -----------------------------------------------------------------
 -- 返回指定用户ID适用的VIP折扣率
-CREATE OR REPLACE FUNCTION hotel_user.get_user_discount(p_user_id NUMBER) RETURN NUMBER IS
+CREATE OR REPLACE FUNCTION get_user_discount(p_user_id NUMBER) RETURN NUMBER IS
     v_discount_rate NUMBER(4,3);
 BEGIN
     SELECT v.discount_rate
     INTO v_discount_rate
-    FROM hotel_user.users u
-    JOIN hotel_user.vip_level_policy v ON v.vip_level = u.vip_level
+    FROM users u
+    JOIN vip_level_policy v ON v.vip_level = u.vip_level
     WHERE u.id = p_user_id;
     RETURN v_discount_rate;
 EXCEPTION
@@ -1684,8 +1688,7 @@ END get_user_discount;
 /
 
 -- 计算预订总金额（基于晚数、基础价格和VIP折扣）
--- 简化版：假设每日价格不变，不考虑动态定价
-CREATE OR REPLACE FUNCTION hotel_user.calculate_booking_amount(
+CREATE OR REPLACE FUNCTION calculate_booking_amount(
     p_room_type_id NUMBER,
     p_start_date DATE,
     p_end_date DATE,
@@ -1696,25 +1699,24 @@ CREATE OR REPLACE FUNCTION hotel_user.calculate_booking_amount(
     v_discount NUMBER(4,3);
 BEGIN
     SELECT price_per_night INTO v_base_price
-    FROM hotel_user.room_type WHERE id = p_room_type_id;
+    FROM room_type WHERE id = p_room_type_id;
     v_days := p_end_date - p_start_date;
     IF v_days <= 0 THEN
         RETURN 0;
     END IF;
-    v_discount := hotel_user.get_user_discount(p_user_id);
+    v_discount := get_user_discount(p_user_id);
     RETURN v_base_price * v_days * v_discount;
 END calculate_booking_amount;
 /
 
 -- 计算指定预订ID的可退款金额（若未开始办理入住则全额退款）
-CREATE OR REPLACE FUNCTION hotel_user.calculate_refund_amount(p_booking_id NUMBER) RETURN NUMBER IS
+CREATE OR REPLACE FUNCTION calculate_refund_amount(p_booking_id NUMBER) RETURN NUMBER IS
     v_paid_amount NUMBER(10,2);
     v_status VARCHAR2(30);
     v_start_date DATE;
 BEGIN
     SELECT paid_amount, status, start_time INTO v_paid_amount, v_status, v_start_date
-    FROM hotel_user.bookings WHERE id = p_booking_id;
-    -- 如果已付款、未退款/取消/退房、且尚未开始办理入住，则可全额退款
+    FROM bookings WHERE id = p_booking_id;
     IF v_paid_amount > 0 AND v_status NOT IN ('REFUNDED','CANCELLED','CHECKED_OUT') AND v_start_date > SYSDATE THEN
         RETURN v_paid_amount;
     ELSE
@@ -1723,6 +1725,42 @@ BEGIN
 END calculate_refund_amount;
 /
 
--- 输出完成信息
-SELECT '高级功能（视图、触发器、存储过程、函数）已成功添加。' AS status FROM DUAL;
-COMMIT;
+-- ============================================================================
+-- 调度作业
+-- ============================================================================
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB (
+        job_name        => 'DAILY_VACANCY_STATS_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN hotel_user.generate_daily_stats(TRUNC(SYSDATE)-1, TRUNC(SYSDATE)-1); END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=DAILY; BYHOUR=1; BYMINUTE=0; BYSECOND=0',
+        enabled         => TRUE,
+        comments        => '每日凌晨1点生成昨日的空房统计'
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB (
+        job_name        => 'MONTHLY_VIP_UPGRADE_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN hotel_user.monthly_vip_upgrade(); END;',
+        start_date      => TRUNC(SYSDATE, 'MM') + 1,
+        repeat_interval => 'FREQ=MONTHLY; BYMONTHDAY=1; BYHOUR=3; BYMINUTE=0; BYSECOND=0',
+        enabled         => TRUE,
+        comments        => '每月1日凌晨3点执行VIP等级批量升级'
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+-- ============================================================================
+-- Oracle Text 索引
+-- ============================================================================
+BEGIN
+    EXECUTE IMMEDIATE 'CREATE INDEX idx_hotel_intro_text ON hotel(introduction) INDEXTYPE IS CTXSYS.CONTEXT';
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
