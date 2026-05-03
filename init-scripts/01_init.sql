@@ -60,7 +60,19 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-CREATE ROLE hotel_app_role;
+BEGIN
+    EXECUTE IMMEDIATE 'CREATE ROLE hotel_app_role';
+    DBMS_OUTPUT.PUT_LINE('Role created.');
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE = -1921 THEN
+            DBMS_OUTPUT.PUT_LINE('Role already exists, skipping...');
+        ELSE
+            RAISE;
+        END IF;
+END;
+/
+
 GRANT CREATE SESSION TO hotel_app_role;
 GRANT CREATE TABLE TO hotel_app_role;
 GRANT CREATE VIEW TO hotel_app_role;
@@ -89,7 +101,13 @@ BEGIN
         EXECUTE IMMEDIATE 'DROP TABLE "' || rec.table_name || '" CASCADE CONSTRAINTS';
     END LOOP;
     FOR rec IN (SELECT sequence_name FROM user_sequences) LOOP
-        EXECUTE IMMEDIATE 'DROP SEQUENCE "' || rec.sequence_name || '"';
+        BEGIN
+            EXECUTE IMMEDIATE 'DROP SEQUENCE "' || rec.sequence_name || '"';
+        EXCEPTION
+            WHEN OTHERS THEN
+                IF SQLCODE = -2289 THEN NULL; -- 如果突然找不到了，就随它去吧
+                ELSE RAISE; END IF;
+        END;
     END LOOP;
     FOR rec IN (SELECT view_name FROM user_views WHERE view_name IN (
         'V_HOTEL_ROOM_AVAILABILITY','V_USER_VIP_INFO','V_DAILY_BOOKING_STATS'
