@@ -35,18 +35,18 @@ services:
     volumes:
       - ./redis/data:/data
 
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    container_name: hotel-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - ./minio/data:/data
+  # minio:
+  #   image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+  #   container_name: hotel-minio
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+  #     MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   volumes:
+  #     - ./minio/data:/data
 
   nacos:
     image: nacos/nacos-server:v3.0.3
@@ -79,7 +79,7 @@ services:
       DB_PASSWORD: ${ORACLE_APP_USER_PASSWORD:-Hotel_PWD}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      MINIO_ENDPOINT: http://minio:9000
+      # MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-hotel-files}
@@ -91,8 +91,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      minio:
-        condition: service_started
+      # minio:
+      #   condition: service_started
       nacos:
         condition: service_started
     ports:
