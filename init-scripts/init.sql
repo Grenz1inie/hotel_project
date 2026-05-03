@@ -502,27 +502,27 @@ VALUES (seq_users.NEXTVAL, 'admin', 'adminpass', 'ADMIN', 0, 0.00, '13912345678'
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
 VALUES (seq_users.NEXTVAL, 'frontdesk', 'frontdesk', 'ADMIN', 0, 0.00, '13923456789', 'frontdesk@hotel.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'alice', 'alicepwd', 'USER', 1, 4309.40, '13812345678', 'alice@example.com');
+VALUES (seq_users.NEXTVAL, 'alice', 'alicepwd', 'USER', 1, 5309.40, '13812345678', 'alice@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
 VALUES (seq_users.NEXTVAL, 'bob', 'bobpwd', 'USER', 0, 2576.00, '15987654321', 'bob@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'charlie', 'charliepwd', 'USER', 2, 5085.36, '13698745632', 'charlie@example.com');
+VALUES (seq_users.NEXTVAL, 'charlie', 'charliepwd', 'USER', 2, 16085.36, '13698745632', 'charlie@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
 VALUES (seq_users.NEXTVAL, 'diana', 'dianapwd', 'USER', 1, 1079.20, '18611223344', 'diana@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
 VALUES (seq_users.NEXTVAL, 'leo', 'leopwd', 'USER', 3, 0.00, '13712349876', 'leo@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'mia', 'miapwd', 'USER', 2, 3163.12, '15712348765', 'mia@example.com');
+VALUES (seq_users.NEXTVAL, 'mia', 'miapwd', 'USER', 2, 15363.12, '15712348765', 'mia@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
 VALUES (seq_users.NEXTVAL, 'nina', 'ninapwd', 'USER', 0, 1996.00, '13698761234', 'nina@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
 VALUES (seq_users.NEXTVAL, 'oscar', 'oscarpwd', 'USER', 1, 1320.96, '18623456789', 'oscar@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'paul', 'paulpwd', 'USER', 2, 3438.96, '13787654321', 'paul@example.com');
+VALUES (seq_users.NEXTVAL, 'paul', 'paulpwd', 'USER', 2, 17338.96, '13787654321', 'paul@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'quinn', 'quinnpwd', 'USER', 3, 2699.60, '15876543210', 'quinn@example.com');
+VALUES (seq_users.NEXTVAL, 'quinn', 'quinnpwd', 'USER', 3, 32699.60, '15876543210', 'quinn@example.com');
 INSERT INTO users (id, username, password, role, vip_level, total_consumption, phone, email)
-VALUES (seq_users.NEXTVAL, 'rachel', 'rachelpwd', 'USER', 4, 2243.52, '13911112222', 'rachel@example.com');
+VALUES (seq_users.NEXTVAL, 'rachel', 'rachelpwd', 'USER', 4, 52243.52, '13911112222', 'rachel@example.com');
 
 -- VIP 等级政策
 INSERT INTO vip_level_policy (vip_level, name, discount_rate, checkout_hour, description) VALUES (0, '标准会员', 1.000, 12, '免费注册，标准退房时间为次日中午12:00');
@@ -1102,7 +1102,7 @@ WHERE h.name = '云栖温泉度假酒店'
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 3 + 15/24, TRUNC(SYSDATE) + 5 + 12/24,
-       'CHECKED_IN', 2, 2699.60, 3176.00, 476.40, 2699.60, 2699.60, 0.85,
+       'CONFIRMED', 2, 2699.60, 3176.00, 476.40, 2699.60, 2699.60, 0.85,
        'PAID', 'DIRECT', 'MANUAL', 'CNY', '奎恩', '15876543210', '参加VIP沙龙'
 FROM hotel h, room_type rt, room r, users u
 WHERE h.name = '云栖温泉度假酒店'
@@ -1189,7 +1189,7 @@ WHERE h.name = '星河国际大酒店'
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 1 + 12/24, TRUNC(SYSDATE) + 3 + 10/24,
-       'CHECKED_IN', 4, 1140.48, 1188.00, 47.52, 1140.48, 1140.48, 0.96,
+       'CONFIRMED', 4, 1140.48, 1188.00, 47.52, 1140.48, 1140.48, 0.96,
        'PAID', 'WALLET', 'WALLET', 'CNY', '妮娜', '13698761234', '家庭入住中'
 FROM hotel h, room_type rt, room r, users u
 WHERE h.name = '星河国际大酒店'
@@ -1225,7 +1225,7 @@ WHERE h.name = '星河国际大酒店'
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 2 + 15/24, TRUNC(SYSDATE) + 5 + 12/24,
-       'CHECKED_IN', 2, 1457.28, 1656.00, 198.72, 1457.28, 1457.28, 0.88,
+       'CONFIRMED', 2, 1457.28, 1656.00, 198.72, 1457.28, 1457.28, 0.88,
        'PAID', 'WALLET', 'WALLET', 'CNY', '奎恩', '15876543210', '已办理入住'
 FROM hotel h, room_type rt, room r, users u
 WHERE h.name = '海滩假日酒店'
@@ -1297,7 +1297,7 @@ WHERE h.name = '云栖温泉度假酒店'
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 2 + 14/24, TRUNC(SYSDATE) + 4 + 12/24,
-       'CHECKED_IN', 4, 2318.40, 2576.00, 257.60, 2318.40, 2318.40, 0.90,
+       'CONFIRMED', 4, 2318.40, 2576.00, 257.60, 2318.40, 2318.40, 0.90,
        'PAID', 'DIRECT', 'ARRIVAL', 'CNY', '鲍勃', '15987654321', '木屋体验中'
 FROM hotel h, room_type rt, room r, users u
 WHERE h.name = '云栖温泉度假酒店'
@@ -1408,22 +1408,44 @@ CREATE OR REPLACE VIEW v_daily_booking_stats AS SELECT * FROM mv_daily_booking_s
 CREATE OR REPLACE TRIGGER trg_booking_status_update
 AFTER UPDATE OF status ON bookings
 FOR EACH ROW
+DECLARE
+    v_next_booking_exists NUMBER;
 BEGIN
+    -- 入住：房间状态改为 3（已入住）
     IF :NEW.status = 'CHECKED_IN' THEN
         UPDATE room SET status = 3, updated_time = SYSDATE WHERE id = :NEW.room_id;
+
+    -- 退房：房间状态改为 1（空闲），但需检查是否有未来预订
     ELSIF :NEW.status = 'CHECKED_OUT' THEN
-        UPDATE room SET status = 1, last_checkout_time = SYSDATE, updated_time = SYSDATE WHERE id = :NEW.room_id;
+        SELECT COUNT(*) INTO v_next_booking_exists
+        FROM bookings
+        WHERE room_id = :NEW.room_id
+          AND id != :NEW.id
+          AND status IN ('CONFIRMED', 'PENDING', 'PENDING_CONFIRMATION', 'PENDING_PAYMENT')
+          AND start_time > SYSDATE;
+
+        IF v_next_booking_exists > 0 THEN
+            UPDATE room SET status = 2, updated_time = SYSDATE WHERE id = :NEW.room_id;
+        ELSE
+            UPDATE room SET status = 1, last_checkout_time = SYSDATE, updated_time = SYSDATE WHERE id = :NEW.room_id;
+        END IF;
+
+    -- 取消或退款：房间状态改为空闲或后续预订状态
     ELSIF :NEW.status IN ('CANCELLED', 'REFUNDED') THEN
-        DECLARE
-            v_other_bookings NUMBER;
-        BEGIN
-            SELECT COUNT(*) INTO v_other_bookings FROM bookings
-            WHERE room_id = :NEW.room_id AND id != :NEW.id
-              AND status IN ('CONFIRMED','CHECKED_IN','PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT');
-            IF v_other_bookings = 0 THEN
-                UPDATE room SET status = 1, updated_time = SYSDATE WHERE id = :NEW.room_id;
-            END IF;
-        END;
+        -- 检查是否存在其他有效预订（不包括刚取消/退款的这条）
+        SELECT COUNT(*) INTO v_next_booking_exists
+        FROM bookings
+        WHERE room_id = :NEW.room_id
+          AND id != :NEW.id
+          AND status IN ('CONFIRMED', 'CHECKED_IN', 'PENDING', 'PENDING_CONFIRMATION', 'PENDING_PAYMENT');
+
+        IF v_next_booking_exists > 0 THEN
+            -- 如果存在未来的有效预订，房间状态设为 2（已预订）
+            UPDATE room SET status = 2, updated_time = SYSDATE WHERE id = :NEW.room_id;
+        ELSE
+            -- 没有任何有效预订，设为空闲
+            UPDATE room SET status = 1, updated_time = SYSDATE WHERE id = :NEW.room_id;
+        END IF;
     END IF;
 END;
 /
