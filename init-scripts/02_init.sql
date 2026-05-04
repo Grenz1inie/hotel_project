@@ -614,6 +614,7 @@ BEGIN
                     updated_at = SYSDATE
             WHEN NOT MATCHED THEN
                 INSERT (
+                    id,
                     hotel_id, room_type_id, stat_date, stat_hour,
                     total_rooms, available_rooms,
                     occupied_rooms, reserved_rooms,
@@ -623,6 +624,7 @@ BEGIN
                     created_at, updated_at
                 )
                 VALUES (
+                    seq_vacancy_statistics.NEXTVAL,
                     rec.hotel_id,
                     rec.room_type_id,
                     v_stat_date,
