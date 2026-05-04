@@ -11,10 +11,22 @@ BEGIN
         EXTENT MANAGEMENT LOCAL
         SEGMENT SPACE MANAGEMENT AUTO
     ';
-EXCEPTION WHEN OTHERS THEN
-    IF SQLCODE != -959 THEN RAISE; END IF;
+    DBMS_OUTPUT.PUT_LINE('>> [成功] 表空间 hotel_ts 创建成功。');
+
+EXCEPTION 
+    WHEN OTHERS THEN
+        -- -1543: ORA-01543: tablespace 'HOTEL_TS' already exists
+        IF SQLCODE = -1543 THEN 
+            DBMS_OUTPUT.PUT_LINE('>> [跳过] 表空间 hotel_ts 已存在，无需重复创建。');
+        ELSE 
+            -- 如果是其他错误（比如磁盘空间不足），则打印具体错误并抛出
+            DBMS_OUTPUT.PUT_LINE('>> [异常] 创建 hotel_ts 发生未知错误: ' || SQLERRM);
+            RAISE; 
+        END IF;
 END;
 /
+
+SET SERVEROUTPUT ON;
 
 BEGIN
     EXECUTE IMMEDIATE '
@@ -24,8 +36,17 @@ BEGIN
         EXTENT MANAGEMENT LOCAL
         SEGMENT SPACE MANAGEMENT AUTO
     ';
-EXCEPTION WHEN OTHERS THEN
-    IF SQLCODE != -959 THEN RAISE; END IF;
+    DBMS_OUTPUT.PUT_LINE('>> [成功] 表空间 hotel_idx_ts 创建完毕。');
+EXCEPTION 
+    WHEN OTHERS THEN
+        -- 核心修正：捕获 -1543 (已存在)，且捕获后不 RAISE
+        IF SQLCODE = -1543 THEN 
+            DBMS_OUTPUT.PUT_LINE('>> [跳过] 表空间 hotel_idx_ts 已存在，无需重复创建。');
+        ELSE 
+            -- 只有真正的意外（如权限不足、磁盘满）才抛出错误
+            DBMS_OUTPUT.PUT_LINE('>> [致命错误] 创建 hotel_idx_ts 失败: ' || SQLERRM);
+            RAISE; 
+        END IF;
 END;
 /
 
@@ -37,8 +58,17 @@ BEGIN
         EXTENT MANAGEMENT LOCAL
         SEGMENT SPACE MANAGEMENT AUTO
     ';
-EXCEPTION WHEN OTHERS THEN
-    IF SQLCODE != -959 THEN RAISE; END IF;
+    DBMS_OUTPUT.PUT_LINE('>> [成功] 表空间 hotel_lob_ts 创建成功。');
+EXCEPTION 
+    WHEN OTHERS THEN
+        -- 核心修正：捕获 -1543 (已存在)，并且捕获后不使用 RAISE，这样就不会弹红色的 Error
+        IF SQLCODE = -1543 THEN 
+            DBMS_OUTPUT.PUT_LINE('>> [跳过] 表空间 hotel_lob_ts 已存在，无需重复创建。');
+        ELSE 
+            -- 对于真正的异常（如路径无效、磁盘满），依然打印详细信息并抛出
+            DBMS_OUTPUT.PUT_LINE('>> [异常] 创建 hotel_lob_ts 失败: ' || SQLERRM);
+            RAISE; 
+        END IF;
 END;
 /
 
