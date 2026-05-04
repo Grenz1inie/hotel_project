@@ -202,7 +202,7 @@ BEGIN
     FOR rec IN (
         SELECT sequence_owner, sequence_name 
         FROM all_sequences 
-        WHERE sequence_owner = 'HOTEL_USER'
+        WHERE sequence_owner = 'HOTEL_USER' AND sequence_name NOT LIKE 'ISEQ$$%'
     ) LOOP
         BEGIN
             EXECUTE IMMEDIATE 'DROP SEQUENCE ' || rec.sequence_owner || '."' || rec.sequence_name || '"';

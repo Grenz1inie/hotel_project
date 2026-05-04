@@ -359,6 +359,385 @@ CREATE INDEX idx_vacancy_stats_room_type_date ON vacancy_statistics(room_type_id
 CREATE INDEX idx_vacancy_stats_hotel_date ON vacancy_statistics(hotel_id, stat_date) TABLESPACE hotel_idx_ts;
 
 -- ============================================================================
+-- 触发器
+-- ============================================================================
+
+-- 强制校验时间重叠的触发器
+CREATE OR REPLACE TRIGGER trg_bookings_overlap_check
+FOR INSERT OR UPDATE ON bookings
+COMPOUND TRIGGER
+    TYPE t_booking_info IS RECORD (
+        id         NUMBER(19),
+        room_id    NUMBER(19),
+        start_time DATE,
+        end_time   DATE,
+        status     VARCHAR2(30)
+    );
+    TYPE t_booking_list IS TABLE OF t_booking_info INDEX BY PLS_INTEGER;
+    v_bookings t_booking_list;
+
+    AFTER EACH ROW IS
+    BEGIN
+        -- 仅对有效状态的订单进行重叠校验
+        IF :NEW.status NOT IN ('CANCELLED', 'REFUNDED') THEN
+            v_bookings(v_bookings.COUNT + 1).id := :NEW.id;
+            v_bookings(v_bookings.COUNT).room_id := :NEW.room_id;
+            v_bookings(v_bookings.COUNT).start_time := :NEW.start_time;
+            v_bookings(v_bookings.COUNT).end_time := :NEW.end_time;
+            v_bookings(v_bookings.COUNT).status := :NEW.status;
+        END IF;
+    END AFTER EACH ROW;
+
+    AFTER STATEMENT IS
+        v_overlap_count NUMBER;
+    BEGIN
+        FOR i IN 1 .. v_bookings.COUNT LOOP
+            SELECT COUNT(*)
+            INTO v_overlap_count
+            FROM bookings
+            WHERE room_id = v_bookings(i).room_id
+              AND id != NVL(v_bookings(i).id, 0) -- 排除自身（针对更新操作）
+              AND status NOT IN ('CANCELLED', 'REFUNDED')
+              -- 核心重叠判定算法：(A.Start < B.End) AND (A.End > B.Start)
+              AND start_time < v_bookings(i).end_time
+              AND end_time > v_bookings(i).start_time;
+
+            IF v_overlap_count > 0 THEN
+                RAISE_APPLICATION_ERROR(-20002, 
+                    '房间ID ' || v_bookings(i).room_id || ' 在 ' || 
+                    TO_CHAR(v_bookings(i).start_time, 'YYYY-MM-DD HH24:MI') || ' 至 ' || 
+                    TO_CHAR(v_bookings(i).end_time, 'YYYY-MM-DD HH24:MI') || ' 期间已有预订冲突！');
+            END IF;
+        END LOOP;
+    END AFTER STATEMENT;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_booking_status_update
+FOR UPDATE OF status ON bookings
+COMPOUND TRIGGER
+    -- 用于存储受影响的房间ID，避免变异表错误
+    TYPE t_room_info IS RECORD (
+        room_id NUMBER(19),
+        status  VARCHAR2(50)
+    );
+    TYPE t_room_list IS TABLE OF t_room_info INDEX BY PLS_INTEGER;
+    v_rooms t_room_list;
+
+    AFTER EACH ROW IS
+    BEGIN
+        -- 记录受影响的房间和最新的订单状态
+        v_rooms(v_rooms.COUNT + 1).room_id := :NEW.room_id;
+        v_rooms(v_rooms.COUNT).status := :NEW.status;
+
+        -- 立即执行不需要查询 bookings 表的逻辑
+        IF :NEW.status = 'CHECKED_IN' THEN
+            UPDATE room SET status = 3, updated_time = SYSDATE WHERE id = :NEW.room_id;
+        END IF;
+    END AFTER EACH ROW;
+
+    AFTER STATEMENT IS
+        v_exists NUMBER;
+    BEGIN
+        FOR i IN 1 .. v_rooms.COUNT LOOP
+            -- 处理退房逻辑
+            IF v_rooms(i).status = 'CHECKED_OUT' THEN
+                SELECT COUNT(*) INTO v_exists
+                FROM bookings
+                WHERE room_id = v_rooms(i).room_id
+                  AND status IN ('CONFIRMED', 'PENDING', 'PENDING_CONFIRMATION', 'PENDING_PAYMENT')
+                  AND start_time > SYSDATE;
+
+                IF v_exists > 0 THEN
+                    UPDATE room SET status = 2, updated_time = SYSDATE WHERE id = v_rooms(i).room_id;
+                ELSE
+                    UPDATE room SET status = 1, last_checkout_time = SYSDATE, updated_time = SYSDATE WHERE id = v_rooms(i).room_id;
+                END IF;
+
+            -- 处理取消/退款逻辑
+            ELSIF v_rooms(i).status IN ('CANCELLED', 'REFUNDED') THEN
+                SELECT COUNT(*) INTO v_exists
+                FROM bookings
+                WHERE room_id = v_rooms(i).room_id
+                  AND status IN ('CONFIRMED', 'CHECKED_IN', 'PENDING', 'PENDING_CONFIRMATION', 'PENDING_PAYMENT');
+
+                IF v_exists > 0 THEN
+                    UPDATE room SET status = 2, updated_time = SYSDATE WHERE id = v_rooms(i).room_id;
+                ELSE
+                    UPDATE room SET status = 1, updated_time = SYSDATE WHERE id = v_rooms(i).room_id;
+                END IF;
+            END IF;
+        END LOOP;
+    END AFTER STATEMENT;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_booking_insert
+AFTER INSERT ON bookings
+FOR EACH ROW
+DECLARE
+    v_available_count NUMBER;
+BEGIN
+    IF :NEW.status IN ('PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT','CONFIRMED','CHECKED_IN') THEN
+        UPDATE room_type
+        SET available_count = available_count - 1,
+            updated_time = SYSDATE
+        WHERE id = :NEW.room_type_id AND available_count > 0
+        RETURNING available_count INTO v_available_count;
+
+        IF SQL%NOTFOUND THEN
+            RAISE_APPLICATION_ERROR(-20001, '房型库存不足，无法预订');
+        END IF;
+    END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_booking_cancel_refund
+AFTER UPDATE OF status ON bookings
+FOR EACH ROW
+BEGIN
+    IF :OLD.status IN ('PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT','CONFIRMED','CHECKED_IN')
+       AND :NEW.status IN ('CANCELLED','REFUNDED') THEN
+        UPDATE room_type
+        SET available_count = available_count + 1,
+            updated_time = SYSDATE
+        WHERE id = :NEW.room_type_id;
+    END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_user_vip_upgrade
+BEFORE UPDATE OF total_consumption ON users
+FOR EACH ROW
+DECLARE
+    v_new_level NUMBER(3);
+BEGIN
+    v_new_level := CASE
+        WHEN :NEW.total_consumption >= 50000 THEN 4
+        WHEN :NEW.total_consumption >= 30000 THEN 3
+        WHEN :NEW.total_consumption >= 15000 THEN 2
+        WHEN :NEW.total_consumption >= 5000  THEN 1
+        ELSE 0
+    END;
+    IF v_new_level != :NEW.vip_level THEN
+        :NEW.vip_level := v_new_level;
+        :NEW.updated_at := SYSDATE;
+    END IF;
+END;
+/
+
+-- ============================================================================
+-- 存储过程与函数
+-- ============================================================================
+CREATE OR REPLACE PROCEDURE generate_daily_stats(
+    p_start_date DATE,
+    p_end_date   DATE
+) IS
+    v_stat_date DATE;
+    v_total_rooms NUMBER;
+    v_available_rooms NUMBER;
+    v_occupied_rooms NUMBER;
+    v_reserved_rooms NUMBER;
+    v_maintenance_rooms NUMBER;
+    v_locked_rooms NUMBER;
+    v_vacancy_rate NUMBER(5,4);
+BEGIN
+    v_stat_date := p_start_date;
+
+    WHILE v_stat_date <= p_end_date LOOP
+        FOR rec IN (
+            SELECT h.id AS hotel_id, rt.id AS room_type_id
+            FROM hotel h
+            JOIN room_type rt ON rt.hotel_id = h.id
+            WHERE rt.is_active = 1
+        ) LOOP
+            SELECT 
+                COUNT(*),
+                SUM(CASE WHEN r.status = 1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN r.status = 3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN r.status = 2 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN r.status = 5 THEN 1 ELSE 0 END)
+            INTO 
+                v_total_rooms, 
+                v_available_rooms, 
+                v_occupied_rooms, 
+                v_reserved_rooms, 
+                v_maintenance_rooms
+            FROM room r
+            WHERE r.room_type_id = rec.room_type_id;
+
+            v_locked_rooms := 0;
+
+            IF v_total_rooms > 0 THEN
+                v_vacancy_rate := v_available_rooms / v_total_rooms;
+            ELSE
+                v_vacancy_rate := 0;
+            END IF;
+
+            MERGE INTO vacancy_statistics vs
+            USING (
+                SELECT 
+                    rec.hotel_id AS hid, 
+                    rec.room_type_id AS rtid, 
+                    v_stat_date AS sdate, 
+                    NULL AS shour 
+                FROM DUAL
+            ) src
+            ON (
+                vs.hotel_id = src.hid 
+                AND vs.room_type_id = src.rtid 
+                AND vs.stat_date = src.sdate 
+                AND vs.stat_hour IS NULL
+            )
+            WHEN MATCHED THEN
+                UPDATE SET
+                    total_rooms = v_total_rooms,
+                    available_rooms = v_available_rooms,
+                    occupied_rooms = v_occupied_rooms,
+                    reserved_rooms = v_reserved_rooms,
+                    maintenance_rooms = v_maintenance_rooms,
+                    locked_rooms = v_locked_rooms,
+                    vacancy_count = v_available_rooms,
+                    vacancy_rate = v_vacancy_rate,
+                    occupancy_rate = v_occupied_rooms / NULLIF(v_total_rooms,0),
+                    booking_rate = v_reserved_rooms / NULLIF(v_total_rooms,0),
+                    updated_at = SYSDATE
+            WHEN NOT MATCHED THEN
+                INSERT (
+                    hotel_id, room_type_id, stat_date, stat_hour,
+                    total_rooms, available_rooms,
+                    occupied_rooms, reserved_rooms,
+                    maintenance_rooms, locked_rooms,
+                    vacancy_count, vacancy_rate,
+                    occupancy_rate, booking_rate,
+                    created_at, updated_at
+                )
+                VALUES (
+                    rec.hotel_id,
+                    rec.room_type_id,
+                    v_stat_date,
+                    NULL,
+                    v_total_rooms,
+                    v_available_rooms,
+                    v_occupied_rooms,
+                    v_reserved_rooms,
+                    v_maintenance_rooms,
+                    v_locked_rooms,
+                    v_available_rooms,
+                    v_vacancy_rate,
+                    v_occupied_rooms / NULLIF(v_total_rooms,0),
+                    v_reserved_rooms / NULLIF(v_total_rooms,0),
+                    SYSDATE,
+                    SYSDATE
+                );
+
+        END LOOP;
+
+        v_stat_date := v_stat_date + 1;
+    END LOOP;
+
+    COMMIT;
+
+    DBMS_OUTPUT.PUT_LINE(
+        '统计生成完成，日期范围: ' 
+        || TO_CHAR(p_start_date, 'YYYY-MM-DD') 
+        || ' 至 ' 
+        || TO_CHAR(p_end_date, 'YYYY-MM-DD')
+    );
+END generate_daily_stats;
+/
+
+CREATE OR REPLACE PROCEDURE monthly_vip_upgrade IS
+    CURSOR c_user IS
+        SELECT id, total_consumption, vip_level FROM users;
+BEGIN
+    FOR u IN c_user LOOP
+        DECLARE
+            v_new_level NUMBER(3);
+        BEGIN
+            v_new_level := CASE
+                WHEN u.total_consumption >= 50000 THEN 4
+                WHEN u.total_consumption >= 30000 THEN 3
+                WHEN u.total_consumption >= 15000 THEN 2
+                WHEN u.total_consumption >= 5000  THEN 1
+                ELSE 0
+            END;
+            IF v_new_level != u.vip_level THEN
+                UPDATE users
+                SET vip_level = v_new_level,
+                    updated_at = SYSDATE
+                WHERE id = u.id;
+            END IF;
+        END;
+    END LOOP;
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('月度VIP升级已完成');
+END monthly_vip_upgrade;
+/
+
+CREATE OR REPLACE FUNCTION get_user_discount(p_user_id NUMBER) RETURN NUMBER IS
+    v_discount_rate NUMBER(4,3);
+BEGIN
+    SELECT v.discount_rate
+    INTO v_discount_rate
+    FROM users u
+    JOIN vip_level_policy v ON v.vip_level = u.vip_level
+    WHERE u.id = p_user_id;
+    RETURN v_discount_rate;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 1.000;
+END get_user_discount;
+/
+
+CREATE OR REPLACE FUNCTION calculate_booking_amount(
+    p_room_type_id NUMBER,
+    p_start_date DATE,
+    p_end_date DATE,
+    p_user_id NUMBER
+) RETURN NUMBER IS
+    v_base_price NUMBER(10,2);
+    v_days NUMBER;
+    v_discount NUMBER(4,3);
+BEGIN
+    SELECT price_per_night INTO v_base_price
+    FROM room_type WHERE id = p_room_type_id;
+    v_days := p_end_date - p_start_date;
+    IF v_days <= 0 THEN
+        RETURN 0;
+    END IF;
+    v_discount := get_user_discount(p_user_id);
+    RETURN v_base_price * v_days * v_discount;
+END calculate_booking_amount;
+/
+
+CREATE OR REPLACE FUNCTION calculate_refund_amount(p_booking_id NUMBER) RETURN NUMBER IS
+    v_paid_amount NUMBER(10,2);
+    v_status VARCHAR2(30);
+    v_start_date DATE;
+BEGIN
+    SELECT paid_amount, status, start_time INTO v_paid_amount, v_status, v_start_date
+    FROM bookings WHERE id = p_booking_id;
+    IF v_paid_amount > 0 AND v_status NOT IN ('REFUNDED','CANCELLED','CHECKED_OUT') AND v_start_date > SYSDATE THEN
+        RETURN v_paid_amount;
+    ELSE
+        RETURN 0;
+    END IF;
+END calculate_refund_amount;
+/
+
+
+-- ============================================================================
+-- Oracle Text 索引
+-- ============================================================================
+BEGIN
+    EXECUTE IMMEDIATE 'CREATE INDEX idx_hotel_intro_text ON hotel(introduction) INDEXTYPE IS CTXSYS.CONTEXT';
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+
+-- ============================================================================
 -- 初始化数据
 -- ============================================================================
 
@@ -1028,97 +1407,97 @@ SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 8 + 15/24, TRUNC(SYSDATE) + 10 + 12/24,
        'CONFIRMED', 2, 2243.52, 2736.00, 492.48, 2243.52, 2243.52, 0.82,
        'PAID', 'WALLET', 'WALLET', 'CNY', '瑞秋', '13598761234', '享受钻石专属权益'
-FROM hotel h, room_type rt, room r, users u
+FROM hotel h, room_type rt, users u,
+     (SELECT * FROM (SELECT id, room_type_id FROM room ORDER BY DBMS_RANDOM.VALUE) WHERE ROWNUM = 1) r
 WHERE h.name = '海滩假日酒店'
   AND rt.name = '海天云顶套房' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
-  AND u.username = 'rachel'
-  AND ROWNUM = 1;
+  AND u.username = 'rachel';
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 26 + 15/24, TRUNC(SYSDATE) + 29 + 12/24,
        'PENDING', 2, 4001.76, 4764.00, 762.24, 4001.76, 0.00, 0.84,
        'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '瑞秋', '13598761234', '等待确认私教禅修大师'
-FROM hotel h, room_type rt, room r, users u
+FROM hotel h, room_type rt, users u,
+     (SELECT * FROM (SELECT id, room_type_id FROM room ORDER BY DBMS_RANDOM.VALUE) WHERE ROWNUM = 1) r
 WHERE h.name = '云栖温泉度假酒店'
   AND rt.name = '云栖禅意套房' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
-  AND u.username = 'rachel'
-  AND ROWNUM = 1;
+  AND u.username = 'rachel';
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 2 + 13/24, TRUNC(SYSDATE) + 4 + 11/24,
        'CONFIRMED', 2, 1045.12, 1136.00, 90.88, 1045.12, 1045.12, 0.92,
        'PAID', 'WALLET', 'WALLET', 'CNY', '爱丽丝', '13812345678', '行政房额外预订'
-FROM hotel h, room_type rt, room r, users u
+FROM hotel h, room_type rt, users u,
+     (SELECT * FROM (SELECT id, room_type_id FROM room ORDER BY DBMS_RANDOM.VALUE) WHERE ROWNUM = 1) r
 WHERE h.name = '星河国际大酒店'
   AND rt.name = '星河行政大床房' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
-  AND u.username = 'alice'
-  AND ROWNUM = 1;
+  AND u.username = 'alice';
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 6 + 16/24, TRUNC(SYSDATE) + 9 + 11/24,
        'PENDING_CONFIRMATION', 2, 1618.80, 1704.00, 85.20, 1618.80, 0.00, 0.95,
        'UNPAID', 'ONLINE', 'ALIPAY', 'CNY', '鲍勃', '15987654321', '等待审批确认'
-FROM hotel h, room_type rt, room r, users u
+FROM hotel h, room_type rt, users u,
+     (SELECT * FROM (SELECT id, room_type_id FROM room ORDER BY DBMS_RANDOM.VALUE) WHERE ROWNUM = 1) r
 WHERE h.name = '星河国际大酒店'
   AND rt.name = '星河行政大床房' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
-  AND u.username = 'bob'
-  AND ROWNUM = 1;
+  AND u.username = 'bob';
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark, refund_reason, refund_requested_at)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 4 + 14/24, TRUNC(SYSDATE) + 7 + 11/24,
        'REFUND_REQUESTED', 4, 2138.40, 2376.00, 237.60, 2138.40, 2138.40, 0.90,
        'PAID', 'WALLET', 'WALLET', 'CNY', '查理', '13698745632', '家庭旅行预订',
-       '家中有急事，需要退款', TRUNC(SYSDATE) - 1
-FROM hotel h, room_type rt, room r, users u
+       '家中有急事，需要退员', TRUNC(SYSDATE) - 1
+FROM hotel h, room_type rt, users u,
+     (SELECT * FROM (SELECT id, room_type_id FROM room ORDER BY DBMS_RANDOM.VALUE) WHERE ROWNUM = 1) r
 WHERE h.name = '星河国际大酒店'
   AND rt.name = '星河家庭套房' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
-  AND u.username = 'charlie'
-  AND ROWNUM = 1;
+  AND u.username = 'charlie';
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 1 + 12/24, TRUNC(SYSDATE) + 3 + 10/24,
        'CONFIRMED', 4, 1140.48, 1188.00, 47.52, 1140.48, 1140.48, 0.96,
        'PAID', 'WALLET', 'WALLET', 'CNY', '妮娜', '13698761234', '家庭入住中'
-FROM hotel h, room_type rt, room r, users u
+FROM hotel h, room_type rt, users u,
+     (SELECT * FROM (SELECT id, room_type_id FROM room ORDER BY DBMS_RANDOM.VALUE) WHERE ROWNUM = 1) r
 WHERE h.name = '星河国际大酒店'
   AND rt.name = '星河家庭套房' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
-  AND u.username = 'nina'
-  AND ROWNUM = 1;
+  AND u.username = 'nina';
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 5 + 15/24, TRUNC(SYSDATE) + 7 + 12/24,
        'CONFIRMED', 2, 842.40, 936.00, 93.60, 842.40, 842.40, 0.90,
        'PAID', 'ONLINE', 'WECHAT', 'CNY', '奥斯卡', '18623456789', '城景房要求高楼层'
-FROM hotel h, room_type rt, room r, users u
+FROM hotel h, room_type rt, users u,
+     (SELECT * FROM (SELECT id, room_type_id FROM room ORDER BY DBMS_RANDOM.VALUE) WHERE ROWNUM = 1) r
 WHERE h.name = '星河国际大酒店'
   AND rt.name = '星河城市景观房' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
-  AND u.username = 'oscar'
-  AND ROWNUM = 1;
+  AND u.username = 'oscar';
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
        TRUNC(SYSDATE) + 10 + 17/24, TRUNC(SYSDATE) + 13 + 11/24,
        'PENDING_CONFIRMATION', 2, 1333.80, 1404.00, 70.20, 1333.80, 0.00, 0.95,
        'UNPAID', 'ONLINE', 'WECHAT', 'CNY', '保罗', '13787654321', '等待出差审批'
-FROM hotel h, room_type rt, room r, users u
+FROM hotel h, room_type rt, users u,
+     (SELECT * FROM (SELECT id, room_type_id FROM room ORDER BY DBMS_RANDOM.VALUE) WHERE ROWNUM = 1) r
 WHERE h.name = '星河国际大酒店'
   AND rt.name = '星河城市景观房' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
-  AND u.username = 'paul'
-  AND ROWNUM = 1;
+  AND u.username = 'paul';
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
@@ -1130,7 +1509,7 @@ WHERE h.name = '海滩假日酒店'
   AND rt.name = '海景观景房' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
   AND u.username = 'quinn'
-  AND ROWNUM = 1;
+  AND ROWNUM = 2;
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
@@ -1202,7 +1581,7 @@ WHERE h.name = '云栖温泉度假酒店'
   AND rt.name = '云栖森林木屋' AND rt.hotel_id = h.id
   AND r.room_type_id = rt.id
   AND u.username = 'bob'
-  AND ROWNUM = 1;
+  AND ROWNUM = 3;
 
 INSERT INTO bookings (id, hotel_id, room_type_id, room_id, user_id, start_time, end_time, status, guests, amount, original_amount, discount_amount, payable_amount, paid_amount, discount_rate, payment_status, payment_method, payment_channel, currency, contact_name, contact_phone, remark)
 SELECT seq_bookings.NEXTVAL, h.id, rt.id, r.id, u.id,
@@ -1300,320 +1679,6 @@ GROUP BY h.id, h.name, TRUNC(b.start_time);
 
 CREATE OR REPLACE VIEW v_daily_booking_stats AS SELECT * FROM mv_daily_booking_stats;
 
--- ============================================================================
--- 触发器
--- ============================================================================
-CREATE OR REPLACE TRIGGER trg_booking_status_update
-FOR UPDATE OF status ON bookings
-COMPOUND TRIGGER
-    -- 用于存储受影响的房间ID，避免变异表错误
-    TYPE t_room_info IS RECORD (
-        room_id NUMBER(19),
-        status  VARCHAR2(50)
-    );
-    TYPE t_room_list IS TABLE OF t_room_info INDEX BY PLS_INTEGER;
-    v_rooms t_room_list;
-
-    AFTER EACH ROW IS
-    BEGIN
-        -- 记录受影响的房间和最新的订单状态
-        v_rooms(v_rooms.COUNT + 1).room_id := :NEW.room_id;
-        v_rooms(v_rooms.COUNT).status := :NEW.status;
-
-        -- 立即执行不需要查询 bookings 表的逻辑
-        IF :NEW.status = 'CHECKED_IN' THEN
-            UPDATE room SET status = 3, updated_time = SYSDATE WHERE id = :NEW.room_id;
-        END IF;
-    END AFTER EACH ROW;
-
-    AFTER STATEMENT IS
-        v_exists NUMBER;
-    BEGIN
-        FOR i IN 1 .. v_rooms.COUNT LOOP
-            -- 处理退房逻辑
-            IF v_rooms(i).status = 'CHECKED_OUT' THEN
-                SELECT COUNT(*) INTO v_exists
-                FROM bookings
-                WHERE room_id = v_rooms(i).room_id
-                  AND status IN ('CONFIRMED', 'PENDING', 'PENDING_CONFIRMATION', 'PENDING_PAYMENT')
-                  AND start_time > SYSDATE;
-
-                IF v_exists > 0 THEN
-                    UPDATE room SET status = 2, updated_time = SYSDATE WHERE id = v_rooms(i).room_id;
-                ELSE
-                    UPDATE room SET status = 1, last_checkout_time = SYSDATE, updated_time = SYSDATE WHERE id = v_rooms(i).room_id;
-                END IF;
-
-            -- 处理取消/退款逻辑
-            ELSIF v_rooms(i).status IN ('CANCELLED', 'REFUNDED') THEN
-                SELECT COUNT(*) INTO v_exists
-                FROM bookings
-                WHERE room_id = v_rooms(i).room_id
-                  AND status IN ('CONFIRMED', 'CHECKED_IN', 'PENDING', 'PENDING_CONFIRMATION', 'PENDING_PAYMENT');
-
-                IF v_exists > 0 THEN
-                    UPDATE room SET status = 2, updated_time = SYSDATE WHERE id = v_rooms(i).room_id;
-                ELSE
-                    UPDATE room SET status = 1, updated_time = SYSDATE WHERE id = v_rooms(i).room_id;
-                END IF;
-            END IF;
-        END LOOP;
-    END AFTER STATEMENT;
-END;
-/
-
-CREATE OR REPLACE TRIGGER trg_booking_insert
-AFTER INSERT ON bookings
-FOR EACH ROW
-DECLARE
-    v_available_count NUMBER;
-BEGIN
-    IF :NEW.status IN ('PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT','CONFIRMED','CHECKED_IN') THEN
-        UPDATE room_type
-        SET available_count = available_count - 1,
-            updated_time = SYSDATE
-        WHERE id = :NEW.room_type_id AND available_count > 0
-        RETURNING available_count INTO v_available_count;
-
-        IF SQL%NOTFOUND THEN
-            RAISE_APPLICATION_ERROR(-20001, '房型库存不足，无法预订');
-        END IF;
-    END IF;
-END;
-/
-
-CREATE OR REPLACE TRIGGER trg_booking_cancel_refund
-AFTER UPDATE OF status ON bookings
-FOR EACH ROW
-BEGIN
-    IF :OLD.status IN ('PENDING','PENDING_CONFIRMATION','PENDING_PAYMENT','CONFIRMED','CHECKED_IN')
-       AND :NEW.status IN ('CANCELLED','REFUNDED') THEN
-        UPDATE room_type
-        SET available_count = available_count + 1,
-            updated_time = SYSDATE
-        WHERE id = :NEW.room_type_id;
-    END IF;
-END;
-/
-
-CREATE OR REPLACE TRIGGER trg_user_vip_upgrade
-AFTER UPDATE OF total_consumption ON users
-FOR EACH ROW
-DECLARE
-    v_new_level NUMBER(3);
-BEGIN
-    v_new_level := CASE
-        WHEN :NEW.total_consumption >= 50000 THEN 4
-        WHEN :NEW.total_consumption >= 30000 THEN 3
-        WHEN :NEW.total_consumption >= 15000 THEN 2
-        WHEN :NEW.total_consumption >= 5000  THEN 1
-        ELSE 0
-    END;
-    IF v_new_level != :NEW.vip_level THEN
-        UPDATE users SET vip_level = v_new_level, updated_at = SYSDATE WHERE id = :NEW.id;
-    END IF;
-END;
-/
-
--- ============================================================================
--- 存储过程与函数
--- ============================================================================
-CREATE OR REPLACE PROCEDURE generate_daily_stats(
-    p_start_date DATE,
-    p_end_date   DATE
-) IS
-    v_stat_date DATE;
-    v_total_rooms NUMBER;
-    v_available_rooms NUMBER;
-    v_occupied_rooms NUMBER;
-    v_reserved_rooms NUMBER;
-    v_maintenance_rooms NUMBER;
-    v_locked_rooms NUMBER;
-    v_vacancy_rate NUMBER(5,4);
-BEGIN
-    v_stat_date := p_start_date;
-
-    WHILE v_stat_date <= p_end_date LOOP
-        FOR rec IN (
-            SELECT h.id AS hotel_id, rt.id AS room_type_id
-            FROM hotel h
-            JOIN room_type rt ON rt.hotel_id = h.id
-            WHERE rt.is_active = 1
-        ) LOOP
-            SELECT 
-                COUNT(*),
-                SUM(CASE WHEN r.status = 1 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN r.status = 3 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN r.status = 2 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN r.status = 5 THEN 1 ELSE 0 END)
-            INTO 
-                v_total_rooms, 
-                v_available_rooms, 
-                v_occupied_rooms, 
-                v_reserved_rooms, 
-                v_maintenance_rooms
-            FROM room r
-            WHERE r.room_type_id = rec.room_type_id;
-
-            v_locked_rooms := 0;
-
-            IF v_total_rooms > 0 THEN
-                v_vacancy_rate := v_available_rooms / v_total_rooms;
-            ELSE
-                v_vacancy_rate := 0;
-            END IF;
-
-            MERGE INTO vacancy_statistics vs
-            USING (
-                SELECT 
-                    rec.hotel_id AS hid, 
-                    rec.room_type_id AS rtid, 
-                    v_stat_date AS sdate, 
-                    NULL AS shour 
-                FROM DUAL
-            ) src
-            ON (
-                vs.hotel_id = src.hid 
-                AND vs.room_type_id = src.rtid 
-                AND vs.stat_date = src.sdate 
-                AND vs.stat_hour IS NULL
-            )
-            WHEN MATCHED THEN
-                UPDATE SET
-                    total_rooms = v_total_rooms,
-                    available_rooms = v_available_rooms,
-                    occupied_rooms = v_occupied_rooms,
-                    reserved_rooms = v_reserved_rooms,
-                    maintenance_rooms = v_maintenance_rooms,
-                    locked_rooms = v_locked_rooms,
-                    vacancy_count = v_available_rooms,
-                    vacancy_rate = v_vacancy_rate,
-                    occupancy_rate = v_occupied_rooms / NULLIF(v_total_rooms,0),
-                    booking_rate = v_reserved_rooms / NULLIF(v_total_rooms,0),
-                    updated_at = SYSDATE
-            WHEN NOT MATCHED THEN
-                INSERT (
-                    hotel_id, room_type_id, stat_date, stat_hour,
-                    total_rooms, available_rooms,
-                    occupied_rooms, reserved_rooms,
-                    maintenance_rooms, locked_rooms,
-                    vacancy_count, vacancy_rate,
-                    occupancy_rate, booking_rate,
-                    created_at, updated_at
-                )
-                VALUES (
-                    rec.hotel_id,
-                    rec.room_type_id,
-                    v_stat_date,
-                    NULL,
-                    v_total_rooms,
-                    v_available_rooms,
-                    v_occupied_rooms,
-                    v_reserved_rooms,
-                    v_maintenance_rooms,
-                    v_locked_rooms,
-                    v_available_rooms,
-                    v_vacancy_rate,
-                    v_occupied_rooms / NULLIF(v_total_rooms,0),
-                    v_reserved_rooms / NULLIF(v_total_rooms,0),
-                    SYSDATE,
-                    SYSDATE
-                );
-
-        END LOOP;
-
-        v_stat_date := v_stat_date + 1;
-    END LOOP;
-
-    COMMIT;
-
-    DBMS_OUTPUT.PUT_LINE(
-        '统计生成完成，日期范围: ' 
-        || TO_CHAR(p_start_date, 'YYYY-MM-DD') 
-        || ' 至 ' 
-        || TO_CHAR(p_end_date, 'YYYY-MM-DD')
-    );
-END generate_daily_stats;
-/
-
-CREATE OR REPLACE PROCEDURE monthly_vip_upgrade IS
-    CURSOR c_user IS
-        SELECT id, total_consumption, vip_level FROM users;
-BEGIN
-    FOR u IN c_user LOOP
-        DECLARE
-            v_new_level NUMBER(3);
-        BEGIN
-            v_new_level := CASE
-                WHEN u.total_consumption >= 50000 THEN 4
-                WHEN u.total_consumption >= 30000 THEN 3
-                WHEN u.total_consumption >= 15000 THEN 2
-                WHEN u.total_consumption >= 5000  THEN 1
-                ELSE 0
-            END;
-            IF v_new_level != u.vip_level THEN
-                UPDATE users
-                SET vip_level = v_new_level,
-                    updated_at = SYSDATE
-                WHERE id = u.id;
-            END IF;
-        END;
-    END LOOP;
-    COMMIT;
-    DBMS_OUTPUT.PUT_LINE('月度VIP升级已完成');
-END monthly_vip_upgrade;
-/
-
-CREATE OR REPLACE FUNCTION get_user_discount(p_user_id NUMBER) RETURN NUMBER IS
-    v_discount_rate NUMBER(4,3);
-BEGIN
-    SELECT v.discount_rate
-    INTO v_discount_rate
-    FROM users u
-    JOIN vip_level_policy v ON v.vip_level = u.vip_level
-    WHERE u.id = p_user_id;
-    RETURN v_discount_rate;
-EXCEPTION
-    WHEN NO_DATA_FOUND THEN
-        RETURN 1.000;
-END get_user_discount;
-/
-
-CREATE OR REPLACE FUNCTION calculate_booking_amount(
-    p_room_type_id NUMBER,
-    p_start_date DATE,
-    p_end_date DATE,
-    p_user_id NUMBER
-) RETURN NUMBER IS
-    v_base_price NUMBER(10,2);
-    v_days NUMBER;
-    v_discount NUMBER(4,3);
-BEGIN
-    SELECT price_per_night INTO v_base_price
-    FROM room_type WHERE id = p_room_type_id;
-    v_days := p_end_date - p_start_date;
-    IF v_days <= 0 THEN
-        RETURN 0;
-    END IF;
-    v_discount := get_user_discount(p_user_id);
-    RETURN v_base_price * v_days * v_discount;
-END calculate_booking_amount;
-/
-
-CREATE OR REPLACE FUNCTION calculate_refund_amount(p_booking_id NUMBER) RETURN NUMBER IS
-    v_paid_amount NUMBER(10,2);
-    v_status VARCHAR2(30);
-    v_start_date DATE;
-BEGIN
-    SELECT paid_amount, status, start_time INTO v_paid_amount, v_status, v_start_date
-    FROM bookings WHERE id = p_booking_id;
-    IF v_paid_amount > 0 AND v_status NOT IN ('REFUNDED','CANCELLED','CHECKED_OUT') AND v_start_date > SYSDATE THEN
-        RETURN v_paid_amount;
-    ELSE
-        RETURN 0;
-    END IF;
-END calculate_refund_amount;
-/
 
 -- ============================================================================
 -- 调度作业
@@ -1646,11 +1711,3 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END;
 /
 
--- ============================================================================
--- Oracle Text 索引
--- ============================================================================
-BEGIN
-    EXECUTE IMMEDIATE 'CREATE INDEX idx_hotel_intro_text ON hotel(introduction) INDEXTYPE IS CTXSYS.CONTEXT';
-EXCEPTION WHEN OTHERS THEN NULL;
-END;
-/
