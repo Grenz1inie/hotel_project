@@ -1,0 +1,201 @@
+/* ===================================================
+   RoomAvailabilityStrip — 预订时段预览条样式
+   命名规范：BEM，前缀 ras-
+   =================================================== */
+
+.ras-card {
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  transition: box-shadow 0.3s ease;
+}
+
+.ras-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* ---------- 标题行 ---------- */
+.ras-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ras-header__icon {
+  font-size: 16px;
+  color: #1890ff;
+}
+
+.ras-header__title {
+  font-size: 15px;
+}
+
+.ras-header__rooms {
+  font-size: 13px;
+}
+
+.ras-datepicker {
+  flex-shrink: 0;
+}
+
+/* ---------- 时间轴容器 ---------- */
+.ras-timeline-wrap {
+  position: relative;
+  /* 为刻度标签留出底部空间 */
+  padding-bottom: 32px;
+}
+
+/* ---------- 色块轨道 ---------- */
+.ras-track {
+  position: relative;
+  height: 48px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* 轨道背景竖线纹理 */
+.ras-track::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  background-size: calc(100% / 24) 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ---------- 色块区段 ---------- */
+.ras-segment {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  transition: opacity 0.2s;
+}
+
+.ras-segment--available {
+  background: linear-gradient(180deg, rgba(82, 196, 26, 0.75) 0%, rgba(56, 158, 13, 0.65) 100%);
+}
+
+.ras-segment--occupied {
+  background: linear-gradient(180deg, rgba(255, 77, 79, 0.82) 0%, rgba(207, 19, 34, 0.72) 100%);
+}
+
+/* ---------- 时间刻度轴 ---------- */
+.ras-axis {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+}
+
+.ras-tick {
+  position: absolute;
+  bottom: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 20px; /* 限制宽度 */
+}
+
+.ras-tick::before {
+  content: '';
+  display: block;
+  width: 1px;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.ras-tick__label {
+  font-size: 9px; /* 缩小字号以适应 24 小时密集显示 */
+  color: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
+}
+
+/* 屏幕较窄时隐藏奇数小时的文字，防止覆盖 */
+@media (max-width: 900px) {
+  .ras-tick:nth-child(2n+1) .ras-tick__label {
+    visibility: hidden;
+  }
+}
+
+/* ---------- 加载 / 错误态 ---------- */
+.ras-loading,
+.ras-error {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px dashed rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* ---------- 图例 ---------- */
+.ras-legend {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.ras-legend__text {
+  font-size: 12px;
+}
+
+/* ===================================================
+   Dark Mode
+   =================================================== */
+body[data-theme='dark'] .ras-card {
+  background: rgba(28, 32, 48, 0.92);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+body[data-theme='dark'] .ras-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+body[data-theme='dark'] .ras-track::after {
+  background-image: linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+}
+
+body[data-theme='dark'] .ras-segment--available {
+  background: linear-gradient(180deg, rgba(82, 196, 26, 0.65) 0%, rgba(56, 158, 13, 0.55) 100%);
+}
+
+body[data-theme='dark'] .ras-segment--occupied {
+  background: linear-gradient(180deg, rgba(255, 77, 79, 0.72) 0%, rgba(207, 19, 34, 0.62) 100%);
+}
+
+body[data-theme='dark'] .ras-tick__label {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+body[data-theme='dark'] .ras-tick::before {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+body[data-theme='dark'] .ras-header__icon {
+  color: #40a9ff;
+}
+
+body[data-theme='dark'] .ras-legend {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+body[data-theme='dark'] .ras-loading,
+body[data-theme='dark'] .ras-error {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.1);
+}

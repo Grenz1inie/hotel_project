@@ -1,0 +1,10 @@
+spring:
+  datasource:
+    # 生产环境：连接 Docker 网络内部的容器服务名 (hotel-oracle)
+    url: jdbc:oracle:thin:@hotel-oracle:1521/FREEPDB1
+  cloud:
+    nacos:
+      discovery:
+        server-addr: nacos:8848
+      config:
+        server-addr: nacos:8848

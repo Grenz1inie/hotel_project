@@ -1,0 +1,39 @@
+.chatbot-container {
+    width: 300px;
+    border: 1px solid #e5e5e5;
+    border-radius: 10px;
+    padding: 12px;
+    background: #fafbfd;
+}
+
+.chat-history {
+    min-height: 200px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 8px;
+    font-size: 15px;
+}
+
+.msg {
+    margin: 6px 0;
+}
+
+.msg-user {
+    text-align: right;
+    color: #0066c0;
+}
+
+.msg-bot {
+    text-align: left;
+    color: #222;
+}
+
+.chat-input-bar {
+    display: flex;
+    gap: 6px;
+}
+
+.chat-input-bar input {
+    flex: 1;
+    padding: 4px;
+}

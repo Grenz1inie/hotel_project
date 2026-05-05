@@ -1,0 +1,476 @@
+/* 替代 Ant Design Space vertical，避免其 align-items:center 导致子卡片宽度收缩 */
+.room-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+}
+
+.room-instance-grid {
+  display: grid;
+  /* auto-fill 尽可能多填列，每列最小 180px 最大 240px，不无限拉伸 */
+  grid-template-columns: repeat(auto-fill, minmax(180px, 240px));
+  gap: 16px;
+  align-items: start;
+  justify-content: start;
+}
+
+.room-type-panel {
+  border-radius: 20px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.06);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 1) 100%);
+}
+
+body[data-theme='dark'] .room-type-panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.65);
+  background: linear-gradient(135deg, rgba(25, 34, 52, 0.92) 0%, rgba(11, 14, 22, 0.94) 100%);
+}
+
+.room-type-panel__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.room-type-panel__title-text {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.room-type-panel__name {
+  position: relative;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--room-type-accent, #1d39c4);
+  padding: 2px 12px 2px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(29, 57, 196, 0.16) 0%, rgba(29, 57, 196, 0.04) 100%);
+  box-shadow: inset 0 0 0 1px rgba(29, 57, 196, 0.18);
+}
+
+body[data-theme='dark'] .room-type-panel__name {
+  color: rgba(173, 198, 255, 0.95);
+  background: linear-gradient(135deg, rgba(64, 120, 255, 0.16) 0%, rgba(64, 120, 255, 0.06) 100%);
+  box-shadow: inset 0 0 0 1px rgba(64, 120, 255, 0.34);
+}
+
+.room-type-panel__type-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(47, 84, 235, 0.08);
+  color: var(--room-type-accent, #2F54EB);
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+body[data-theme='dark'] .room-type-panel__type-tag {
+  background: rgba(64, 120, 255, 0.16);
+  color: rgba(173, 198, 255, 0.92);
+}
+
+.room-type-panel__subtitle {
+  font-size: 13px;
+}
+
+.room-type-panel__metrics {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.room-type-panel__title-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.room-type-panel__timeline-button {
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(47, 84, 235, 0.18);
+  border: none;
+}
+
+body[data-theme='dark'] .room-type-panel__timeline-button {
+  box-shadow: 0 12px 28px rgba(64, 120, 255, 0.35);
+}
+
+.room-type-panel__metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.room-type-panel__metric--progress .ant-progress-inner {
+  width: 96px !important; /* 原76px，放大20px */
+  height: 96px !important; /* 原76px，放大20px */
+  font-size: 48px !important; /* 原17.4px，放大字号 */
+}
+.room-type-panel__metric--progress .ant-progress-text {
+  font-size: 30px !important; /* 进度文字放大 */
+}
+
+/* 环形进度条下方的“入住率”文本样式 */
+.room-type-panel__metric--progress .progress-label {
+  font-size: 15.5px; /* 核心：调整字体大小，按需修改（如14px/18px） */
+  /* 可选：补充其他样式，比如加粗、调整间距 */
+  font-weight: 500; 
+  margin-top: -4px; 
+}
+
+/* .room-type-panel__metric--progress .ant-progress-text {
+  color: var(--room-type-accent, #2F54EB);
+  font-weight: 600;
+} */
+
+.room-type-panel__metric-list {
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* 垂直居中文字行 */
+  gap: 6px; /* 调整行间距，让布局更紧凑 */
+}
+
+.room-type-panel__metric-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 15px;
+  line-height: 2.65;
+}
+
+.room-type-panel__metric-label {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 15px;
+}
+
+.room-type-panel__metric-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.9);
+}
+
+.room-type-panel__metric-value--available {
+  color: #389e0d;
+}
+
+body[data-theme='dark'] .room-type-panel__metric-label {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+body[data-theme='dark'] .room-type-panel__metric-value {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.room-type-panel__status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.room-type-panel__status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 18px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+body[data-theme='dark'] .room-type-panel__status-chip {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.room-type-panel__status-chip:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.85);
+}
+
+body[data-theme='dark'] .room-type-panel__status-chip:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.room-type-panel__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.room-instance-card {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 16px 18px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  color: rgba(0, 0, 0, 0.88);
+  min-height: 0;
+  height: 100%;
+}
+
+body[data-theme='dark'] .room-instance-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(150deg, rgba(22, 26, 36, 0.96) 0%, rgba(7, 8, 12, 0.98) 100%);
+  color: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 24px 42px rgba(0, 0, 0, 0.65);
+}
+
+body[data-theme='dark'] .room-instance-card:hover,
+body[data-theme='dark'] .room-instance-card:focus-visible {
+  box-shadow: 0 28px 48px rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.room-instance-card:hover,
+.room-instance-card:focus-visible {
+  transform: translateY(-6px);
+  box-shadow: 0 24px 42px rgba(30, 41, 59, 0.18);
+  border-color: rgba(0, 0, 0, 0.08);
+  outline: none;
+}
+
+.room-instance-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.room-instance-card__number {
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.room-instance-card__status {
+  border-radius: 999px;
+  padding: 0 12px;
+  font-weight: 600;
+}
+
+.room-instance-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.room-instance-card__info-list {
+  display: grid;
+  gap: 10px;
+}
+
+.room-instance-card__info-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.room-instance-card__info-label {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.52);
+  flex: 0 0 auto;
+}
+
+body[data-theme='dark'] .room-instance-card__info-label {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.room-instance-card__info-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.88);
+  flex: 1 1 auto;
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-all;
+}
+
+body[data-theme='dark'] .room-instance-card__info-value {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.room-instance-card__booking-tag {
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 22px;
+}
+
+body[data-theme='dark'] .room-instance-card__booking-tag {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: rgba(255, 255, 255, 0.9);
+  border: none;
+}
+
+.room-instance-card__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  line-height: 1;
+  min-height: 32px;
+  width: 100%;
+  justify-content: flex-start;
+  white-space: nowrap;
+}
+
+body[data-theme='dark'] .room-instance-card__chip {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.room-instance-card__chip--muted {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+body[data-theme='dark'] .room-instance-card__chip--muted {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.room-instance-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.room-instance-card__hint {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-instance-card__icon {
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  transition: transform 0.2s ease;
+}
+
+.room-instance-card:hover .room-instance-card__icon {
+  transform: translateX(4px);
+}
+
+.room-type-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-bottom: 24px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  border-radius: 12px;
+  border: 2px solid rgba(102, 126, 234, 0.2);
+  backdrop-filter: blur(10px);
+  gap: 12px;
+}
+
+.room-type-nav__trigger {
+  font-weight: 500;
+  font-size: 14px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: white !important;
+  border: none !important;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  transition: all 0.3s ease;
+  animation: pulse-glow 2s infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  }
+  50% {
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+  }
+}
+
+.room-type-nav__trigger:hover,
+.room-type-nav__trigger:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6) !important;
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%) !important;
+}
+
+.room-type-nav__item {
+  border: none;
+  background: transparent;
+  padding: 10px 16px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.room-type-nav__item:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+  color: #667eea;
+  transform: translateX(4px);
+}
+
+body[data-theme='dark'] .room-type-nav__item {
+  color: #e0e0e0;
+}
+
+body[data-theme='dark'] .room-type-nav__item:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.25) 0%, rgba(118, 75, 162, 0.25) 100%);
+  color: #8fa3f5;
+}
+
+/* 暗色模式下的导航容器优化 */
+body[data-theme='dark'] .room-type-nav {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border-color: rgba(102, 126, 234, 0.3);
+}
+
+@media (max-width: 1200px) {
+  .room-instance-grid {
+    gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 220px));
+  }
+}
+
+@media (max-width: 768px) {
+  .room-instance-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 200px));
+    gap: 10px;
+  }
+  .room-instance-card {
+    padding: 14px 16px;
+    border-radius: 14px;
+  }
+}

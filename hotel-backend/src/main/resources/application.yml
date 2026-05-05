@@ -1,0 +1,73 @@
+server:
+  port: 8080
+  tomcat:
+    threads:
+      max: 2000        # 再拉高一点
+      min-spare: 200   # 保持更多核心线程不回收
+    max-connections: 12000
+    accept-count: 1000
+    connection-timeout: 3000
+    keep-alive-timeout: 60
+
+spring:
+  profiles:
+    active: dev
+  application:
+    name: hotel-backend
+  config:
+    import: optional:nacos:application.yml
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+
+  datasource:
+    driver-class-name: oracle.jdbc.OracleDriver
+    # 现在具体配置已移至 application-dev.yml 和 application-prod.yml
+    username: hotel_user
+    password: 123456
+
+  data:
+    redis:
+      host: localhost
+      timeout: 2000ms   # 避免长时间卡死
+      lettuce:
+        pool:
+          max-active: 800      # 👈 提高
+          max-idle: 300
+          min-idle: 100
+          max-wait: 1000ms     # 👈 降低等待时间
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+    serialization:
+      write-dates-as-timestamps: false
+
+# minio:
+aliyun:
+  oss:
+    endpoint: oss-cn-beijing.aliyuncs.com
+    access-key-id:
+    access-key-secret:
+    bucket-name: hotelhotel
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: assign_id
+
+jwt:
+  secret: "change-this-secret-to-a-very-long-random-string"
+  expires-hours: 12
+
+deepseek:
+  api:
+    url: https://api.deepseek.com/v1/chat/completions
+    key: ${DEEPSEEK_API_KEY}
+  model: deepseek-chat

@@ -1,0 +1,10 @@
+spring:
+  datasource:
+    # 开发环境：连接映射到宿主机的端口 (localhost)
+    url: jdbc:oracle:thin:@localhost:1521/FREEPDB1
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+      config:
+        server-addr: 127.0.0.1:8848
