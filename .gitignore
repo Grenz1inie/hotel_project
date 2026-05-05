@@ -1,10 +1,10 @@
 ﻿# =========================
 # 中间件与数据库数据目录
 # =========================
-cloudbeaver/
+cloudbeaver-data/
 minio/
-oracle/oradata
-redis/
+oracle-data/
+redis-data/
 
 # =========================
 # Dependencies (Node / Java)

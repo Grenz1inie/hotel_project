@@ -1,0 +1,16 @@
+services:
+  # CloudBeaver：数据库图形化管理工具
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:latest
+    container_name: hotel-cloudbeaver
+    ports:
+      - "8978:8978"
+    environment:
+      - CLOUDBEAVER_CORE_LOCALIZATION=zh
+      - CB_ADMIN_NAME=cbadmin
+      - CB_ADMIN_PASSWORD=CbAdmin_2025
+      - CB_SERVER_NAME=CloudBeaverServer
+    volumes:
+      - ./cloudbeaver-data/logs:/opt/cloudbeaver/logs
+      - ./cloudbeaver-data/workspace:/opt/cloudbeaver/workspace
+      - ./cloudbeaver-data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/.dbeaver/data-sources.json:ro

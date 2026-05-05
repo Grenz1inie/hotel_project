@@ -32,14 +32,26 @@ spring:
 
   data:
     redis:
-      host: localhost
       timeout: 2000ms   # 避免长时间卡死
+      cluster:
+        nodes:
+          - ${REDIS_CLUSTER_NODE1:127.0.0.1:6379}
+          - ${REDIS_CLUSTER_NODE2:127.0.0.1:6380}
+          - ${REDIS_CLUSTER_NODE3:127.0.0.1:6381}
+          - ${REDIS_CLUSTER_NODE4:127.0.0.1:6382}
+          - ${REDIS_CLUSTER_NODE5:127.0.0.1:6383}
+          - ${REDIS_CLUSTER_NODE6:127.0.0.1:6384}
+        max-redirects: 3  # 最大重定向次数
       lettuce:
         pool:
           max-active: 800      # 👈 提高
           max-idle: 300
           min-idle: 100
           max-wait: 1000ms     # 👈 降低等待时间
+        cluster:
+          refresh:
+            adaptive: true      # 开启自适应刷新
+            period: 60s         # 刷新周期
 
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss

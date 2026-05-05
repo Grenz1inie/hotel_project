@@ -2,6 +2,16 @@ spring:
   datasource:
     # 开发环境：连接映射到宿主机的端口 (localhost)
     url: jdbc:oracle:thin:@localhost:1521/FREEPDB1
+  data:
+    redis:
+      cluster:
+        nodes:
+          - 127.0.0.1:6379
+          - 127.0.0.1:6380
+          - 127.0.0.1:6381
+          - 127.0.0.1:6382
+          - 127.0.0.1:6383
+          - 127.0.0.1:6384
   cloud:
     nacos:
       discovery:

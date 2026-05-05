@@ -1,0 +1,21 @@
+services:
+  # Oracle：核心业务数据库服务
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    container_name: hotel-oracle
+    restart: unless-stopped
+    ports:
+      - "1521:1521"
+    environment:
+      - ORACLE_PASSWORD=Hotel_PWD
+      - ORACLE_CHARACTERSET=AL32UTF8
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./oracle-data:/opt/oracle/oradata
+      - ./init-sqls:/container-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'SELECT status FROM v$$instance;' | sqlplus -S system/Hotel_PWD@localhost:1521/FREE | grep -q 'OPEN' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s

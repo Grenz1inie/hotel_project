@@ -2,6 +2,16 @@ spring:
   datasource:
     # 生产环境：连接 Docker 网络内部的容器服务名 (hotel-oracle)
     url: jdbc:oracle:thin:@hotel-oracle:1521/FREEPDB1
+  data:
+    redis:
+      cluster:
+        nodes:
+          - redis-node-1:6379
+          - redis-node-2:6379
+          - redis-node-3:6379
+          - redis-node-4:6379
+          - redis-node-5:6379
+          - redis-node-6:6379
   cloud:
     nacos:
       discovery:
