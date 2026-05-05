@@ -1,21 +1,4 @@
 services:
-  # Nacos：服务注册与配置中心
-  nacos:
-    image: nacos/nacos-server:v3.0.3
-    container_name: hotel-nacos
-    environment:
-      MODE: standalone
-      PREFER_HOST_MODE: hostname
-      NACOS_AUTH_ENABLE: "false"
-      NACOS_AUTH_TOKEN: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
-      NACOS_AUTH_IDENTITY_KEY: "serverIdentity"
-      NACOS_AUTH_IDENTITY_VALUE: "security"
-    ports:
-      - "8848:8848"
-      - "9848:9848"
-      - "9849:9849"
-      - "7848:7848"
-
   # Nginx：统一入口网关
   nginx:
     image: nginx:1.27-alpine

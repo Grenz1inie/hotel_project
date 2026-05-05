@@ -1,0 +1,37 @@
+services:
+  backend:
+    build:
+      context: ../../
+      dockerfile: docker/apps/Dockerfile.backend
+      target: backend-runtime
+    container_name: hotel-backend
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: oracle
+      DB_PORT: 1521
+      DB_SERVICE: FREEPDB1
+      DB_USERNAME: ${ORACLE_APP_USER:-system}
+      DB_PASSWORD: ${ORACLE_APP_USER_PASSWORD:-Hotel_PWD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-hotel-files}
+      NACOS_SERVER_ADDR: nacos:8848
+      SPRING_CLOUD_NACOS_SERVER_ADDR: nacos:8848
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+    depends_on:
+      oracle:
+        condition: service_healthy
+      redis-master:
+        condition: service_started
+      nacos:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s

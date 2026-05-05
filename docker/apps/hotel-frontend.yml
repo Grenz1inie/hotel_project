@@ -1,0 +1,14 @@
+services:
+  nginx:
+    build:
+      context: ../../
+      dockerfile: docker/apps/Dockerfile.frontend
+      target: nginx-runtime
+    image: hotel-nginx:prod
+    container_name: hotel-nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    restart: unless-stopped

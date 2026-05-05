@@ -7,9 +7,8 @@
 # 镜像构建必须保留的文件/目录
 # =========================
 !Dockerfile
-!nginx/nginx.conf
-!nginx/nginx.dev.conf
-!nginx/nginx.prod.conf
+!nginx-conf/**
+!nginx-conf/
 !hotel-frontend/**
 !hotel-backend/
 !hotel-backend/hotel-backend/
