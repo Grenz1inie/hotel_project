@@ -7,18 +7,20 @@
 # 镜像构建必须保留的文件/目录
 # =========================
 !Dockerfile
+!docker/
+!docker/**
 !nginx-conf/**
 !nginx-conf/
 !hotel-frontend/**
+!hotel-frontend/
 !hotel-backend/
-!hotel-backend/hotel-backend/
-!hotel-backend/hotel-backend/pom.xml
-!hotel-backend/hotel-backend/mvnw
-!hotel-backend/hotel-backend/mvnw.cmd
-!hotel-backend/hotel-backend/.mvn
-!hotel-backend/hotel-backend/.mvn/**
-!hotel-backend/hotel-backend/src
-!hotel-backend/hotel-backend/src/**
+!hotel-backend/pom.xml
+!hotel-backend/mvnw
+!hotel-backend/mvnw.cmd
+!hotel-backend/.mvn
+!hotel-backend/.mvn/**
+!hotel-backend/src
+!hotel-backend/src/**
 
 # =========================
 # 中间件与数据库数据目录（显式标注，默认也会被 ** 排除）

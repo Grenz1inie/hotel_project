@@ -33,15 +33,12 @@ spring:
   data:
     redis:
       timeout: 2000ms   # 避免长时间卡死
-      cluster:
+      sentinel:
+        master: ${REDIS_SENTINEL_MASTER:mymaster}
         nodes:
-          - ${REDIS_CLUSTER_NODE1:127.0.0.1:6379}
-          - ${REDIS_CLUSTER_NODE2:127.0.0.1:6380}
-          - ${REDIS_CLUSTER_NODE3:127.0.0.1:6381}
-          - ${REDIS_CLUSTER_NODE4:127.0.0.1:6382}
-          - ${REDIS_CLUSTER_NODE5:127.0.0.1:6383}
-          - ${REDIS_CLUSTER_NODE6:127.0.0.1:6384}
-        max-redirects: 3  # 最大重定向次数
+          - ${REDIS_SENTINEL_NODE1:127.0.0.1:26379}
+          - ${REDIS_SENTINEL_NODE2:127.0.0.1:26380}
+          - ${REDIS_SENTINEL_NODE3:127.0.0.1:26381}
       lettuce:
         pool:
           max-active: 800      # 👈 提高

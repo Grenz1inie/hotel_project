@@ -4,14 +4,12 @@ spring:
     url: jdbc:oracle:thin:@hotel-oracle:1521/FREEPDB1
   data:
     redis:
-      cluster:
+      sentinel:
+        master: mymaster
         nodes:
-          - redis-node-1:6379
-          - redis-node-2:6379
-          - redis-node-3:6379
-          - redis-node-4:6379
-          - redis-node-5:6379
-          - redis-node-6:6379
+          - redis-sentinel1:26379
+          - redis-sentinel2:26379
+          - redis-sentinel3:26379
   cloud:
     nacos:
       discovery:
