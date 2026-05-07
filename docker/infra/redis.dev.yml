@@ -1,9 +1,16 @@
 services:
-  # Redis 主从集群
+  # Redis 主从集群 (开发环境：强制广播宿主机可访问的地址)
   redis-master:
     image: redis:latest
     container_name: redis-master
-    command: ["redis-server", "--appendonly", "yes"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: [
+      "redis-server",
+      "--appendonly", "yes",
+      "--replica-announce-ip", "host.docker.internal",
+      "--replica-announce-port", "6379"
+    ]
     ports:
       - "6379:6379"
     volumes:
@@ -18,7 +25,17 @@ services:
   redis-slave1:
     image: redis:latest
     container_name: redis-slave1
-    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis-master", "6379"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: [
+      "redis-server",
+      "--appendonly", "yes",
+      "--replicaof", "redis-master", "6379",
+      "--replica-announce-ip", "host.docker.internal",
+      "--replica-announce-port", "6380"
+    ]
+    ports:
+      - "6380:6379"
     depends_on:
       redis-master:
         condition: service_healthy
@@ -28,7 +45,17 @@ services:
   redis-slave2:
     image: redis:latest
     container_name: redis-slave2
-    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis-master", "6379"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: [
+      "redis-server",
+      "--appendonly", "yes",
+      "--replicaof", "redis-master", "6379",
+      "--replica-announce-ip", "host.docker.internal",
+      "--replica-announce-port", "6381"
+    ]
+    ports:
+      - "6381:6379"
     depends_on:
       redis-master:
         condition: service_healthy
@@ -39,13 +66,21 @@ services:
   sentinel1:
     image: redis:latest
     container_name: redis-sentinel1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: >
       sh -c "
         echo 'port 26379' > /data/sentinel.conf;
-        getent hosts redis-master | awk '{print \"sentinel monitor mymaster \"$1\" 6379 2\"}' >> /data/sentinel.conf;
+        echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf;
+        echo 'sentinel announce-hostnames yes' >> /data/sentinel.conf;
+        echo 'sentinel monitor mymaster redis-master 6379 2' >> /data/sentinel.conf;
         echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf;
         echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf;
-        redis-sentinel /data/sentinel.conf
+        echo 'sentinel announce-ip host.docker.internal' >> /data/sentinel.conf;
+        echo 'sentinel announce-port 26379' >> /data/sentinel.conf;
+        redis-sentinel /data/sentinel.conf;
+        cat /data/sentinel.conf;
+        tail -f /dev/null;
       "
     ports:
       - "26379:26379"
@@ -58,12 +93,16 @@ services:
   sentinel2:
     image: redis:latest
     container_name: redis-sentinel2
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: >
       sh -c "
         echo 'port 26379' > /data/sentinel.conf;
-        getent hosts redis-master | awk '{print \"sentinel monitor mymaster \"$1\" 6379 2\"}' >> /data/sentinel.conf;
+        echo 'sentinel monitor mymaster redis-master 6379 2' >> /data/sentinel.conf;
         echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf;
         echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf;
+        echo 'sentinel announce-ip host.docker.internal' >> /data/sentinel.conf;
+        echo 'sentinel announce-port 26380' >> /data/sentinel.conf;
         redis-sentinel /data/sentinel.conf
       "
     ports:
@@ -77,12 +116,16 @@ services:
   sentinel3:
     image: redis:latest
     container_name: redis-sentinel3
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: >
       sh -c "
         echo 'port 26379' > /data/sentinel.conf;
-        getent hosts redis-master | awk '{print \"sentinel monitor mymaster \"$1\" 6379 2\"}' >> /data/sentinel.conf;
+        echo 'sentinel monitor mymaster redis-master 6379 2' >> /data/sentinel.conf;
         echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf;
         echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf;
+        echo 'sentinel announce-ip host.docker.internal' >> /data/sentinel.conf;
+        echo 'sentinel announce-port 26381' >> /data/sentinel.conf;
         redis-sentinel /data/sentinel.conf
       "
     ports:

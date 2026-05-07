@@ -1,0 +1,100 @@
+services:
+  # Redis 主从集群
+  redis-master:
+    image: redis:latest
+    container_name: redis-master
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis-data/redis-master:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  redis-slave1:
+    image: redis:latest
+    container_name: redis-slave1
+    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis-master", "6379"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    volumes:
+      - ./redis-data/redis-slave1:/data
+
+  redis-slave2:
+    image: redis:latest
+    container_name: redis-slave2
+    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis-master", "6379"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    volumes:
+      - ./redis-data/redis-slave2:/data
+
+  # Redis-Sentinel 哨兵集群
+  sentinel1:
+    image: redis:latest
+    container_name: redis-sentinel1
+    command: >
+      sh -c "
+        echo 'port 26379' > /data/sentinel.conf;
+        echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf;
+        echo 'sentinel announce-hostnames yes' >> /data/sentinel.conf;
+        echo 'sentinel monitor mymaster redis-master 6379 2' >> /data/sentinel.conf;
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf;
+        echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf;
+        redis-sentinel /data/sentinel.conf
+      "
+    ports:
+      - "26379:26379"
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    volumes:
+      - ./redis-data/sentinel1:/data
+
+  sentinel2:
+    image: redis:latest
+    container_name: redis-sentinel2
+    command: >
+      sh -c "
+        echo 'port 26379' > /data/sentinel.conf;
+        echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf;
+        echo 'sentinel announce-hostnames yes' >> /data/sentinel.conf;
+        echo 'sentinel monitor mymaster redis-master 6379 2' >> /data/sentinel.conf;
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf;
+        echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf;
+        redis-sentinel /data/sentinel.conf
+      "
+    ports:
+      - "26380:26379"
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    volumes:
+      - ./redis-data/sentinel2:/data
+
+  sentinel3:
+    image: redis:latest
+    container_name: redis-sentinel3
+    command: >
+      sh -c "
+        echo 'port 26379' > /data/sentinel.conf;
+        echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf;
+        echo 'sentinel announce-hostnames yes' >> /data/sentinel.conf;
+        echo 'sentinel monitor mymaster redis-master 6379 2' >> /data/sentinel.conf;
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf;
+        echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf;
+        redis-sentinel /data/sentinel.conf
+      "
+    ports:
+      - "26381:26379"
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    volumes:
+      - ./redis-data/sentinel3:/data

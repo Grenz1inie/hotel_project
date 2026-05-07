@@ -22,11 +22,7 @@ import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.boot.autoconfigure.data.redis.RedisProperties;
 
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.time.Duration;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Configuration
@@ -38,25 +34,10 @@ public class RedisConfig {
     @Bean(destroyMethod = "shutdown")
     public DefaultClientResources clientResources(RedisProperties redisProperties) {
         DefaultClientResources res = DefaultClientResources.create();
-
-        // 预先获取配置中的 Sentinel 端口列表，避免硬编码
-        Set<Integer> sentinelPorts = redisProperties.getSentinel().getNodes().stream()
-                .map(node -> Integer.parseInt(node.split(":")[1]))
-                .collect(Collectors.toSet());
-
         res.eventBus().get().subscribe(event -> {
             if (event instanceof ConnectedEvent) {
                 ConnectedEvent e = (ConnectedEvent) event;
-                SocketAddress remoteAddress = e.remoteAddress();
-
-                if (remoteAddress instanceof InetSocketAddress) {
-                    int port = ((InetSocketAddress) remoteAddress).getPort();
-                    // 方案 A：动态判断端口是否在 Sentinel 配置列表中
-                    if (sentinelPorts.contains(port)) {
-                        return;
-                    }
-                }
-                log.info("🟢 Redis 数据节点已连接: {}", remoteAddress);
+                log.info("🟢 Redis 节点已连接: {}", e.remoteAddress());
             }
         });
 

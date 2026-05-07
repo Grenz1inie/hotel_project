@@ -5,5 +5,5 @@ include:
   - docker/apps/hotel-frontend.yml
   - docker/apps/hotel-backend.yml
   - docker/infra/oracle.yml
-  - docker/infra/redis.yml
+  - docker/infra/redis.prod.yml
   - docker/tools/ops-tools.yml

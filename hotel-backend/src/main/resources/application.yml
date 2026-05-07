@@ -33,12 +33,6 @@ spring:
   data:
     redis:
       timeout: 2000ms   # 避免长时间卡死
-      sentinel:
-        master: ${REDIS_SENTINEL_MASTER:mymaster}
-        nodes:
-          - ${REDIS_SENTINEL_NODE1:127.0.0.1:26379}
-          - ${REDIS_SENTINEL_NODE2:127.0.0.1:26380}
-          - ${REDIS_SENTINEL_NODE3:127.0.0.1:26381}
       lettuce:
         pool:
           max-active: 800      # 👈 提高

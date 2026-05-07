@@ -3,5 +3,5 @@ name: hotel_project
 include:
   - /docker/apps/nginx.yml
   - /docker/infra/oracle.yml
-  - /docker/infra/redis.yml
+  - /docker/infra/redis.dev.yml
   - /docker/tools/ops-tools.yml
