@@ -23,6 +23,11 @@ spring:
         server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
       config:
         server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD_ADDR:hotel-sentinel-dashboard:8858}
+        port: 8719
+      eager: true
 
   datasource:
     driver-class-name: oracle.jdbc.OracleDriver
@@ -34,6 +39,8 @@ spring:
     redis:
       timeout: 2000ms   # 避免长时间卡死
       lettuce:
+        # 开启读写分离：优先读取从节点 (REPLICA_PREFERRED)
+        # 注意：部分 Spring Boot 版本可能需要通过代码配置类显式指定 ReadFrom
         pool:
           max-active: 800      # 👈 提高
           max-idle: 300
@@ -49,6 +56,26 @@ spring:
     time-zone: GMT+8
     serialization:
       write-dates-as-timestamps: false
+
+jetcache:
+  statIntervalMinutes: 15
+  areaInCacheName: false
+  local:
+    default:
+      type: caffeine
+      keyConvertor: fastjson
+      expireAfterWriteInMillis: 300000 # 5分钟
+  remote:
+    default:
+      type: redis.lettuce
+      keyConvertor: fastjson
+      valueEncoder: kryo
+      valueDecoder: kryo
+      poolConfig:
+        minIdle: 10
+        maxIdle: 50
+        maxTotal: 200
+      # Redis URI 将根据环境在 dev/prod 中配置
 
 # minio:
 aliyun:

@@ -2,11 +2,10 @@ services:
   backend:
     build:
       context: ../../
-      dockerfile: docker/apps/Dockerfile.backend
-      target: backend-runtime
+      dockerfile: docker/apps/Dockerfile.dev.backend
     container_name: hotel-backend
     environment:
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: dev
       DB_HOST: oracle
       DB_PORT: 1521
       DB_SERVICE: FREEPDB1
@@ -19,6 +18,7 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-hotel-files}
       NACOS_SERVER_ADDR: nacos:8848
       SPRING_CLOUD_NACOS_SERVER_ADDR: nacos:8848
+      SENTINEL_DASHBOARD_ADDR: sentinel-dashboard:8858
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
     depends_on:
       oracle:
@@ -27,11 +27,17 @@ services:
         condition: service_started
       nacos:
         condition: service_started
+      sentinel-dashboard:
+        condition: service_started
     ports:
       - "8080:8080"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 40s
+    volumes:
+      - ../../hotel-backend/src:/app/src
+      - ../../hotel-backend/target/classes:/app/target/classes
+      - ../../hotel-backend/pom.xml:/app/pom.xml
+      - ./maven-repo:/root/.m2/repository
+    x-develop:
+      watch:
+        - path: ../../hotel-backend/target/classes
+          action: sync
+          target: /app/target/classes

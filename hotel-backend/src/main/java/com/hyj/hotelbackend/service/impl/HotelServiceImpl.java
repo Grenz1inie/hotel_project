@@ -6,7 +6,7 @@ import com.hyj.hotelbackend.entity.Hotel;
 import com.hyj.hotelbackend.mapper.HotelMapper;
 import com.hyj.hotelbackend.service.HotelService;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.cache.annotation.Cacheable;
+import com.alicp.jetcache.anno.Cached;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -15,7 +15,7 @@ public class HotelServiceImpl extends ServiceImpl<HotelMapper, Hotel> implements
     @Value("${hotel.primary-id:1}")
     private Long primaryHotelId;
 
-    @Cacheable(value = "hotelCache", key = "'primary'", unless = "#result == null")
+    @Cached(name = "hotelCache.", key = "'primary'")
     @Override
     public Hotel getPrimaryHotel() {
         if (primaryHotelId != null) {

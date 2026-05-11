@@ -1,5 +1,7 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
+import com.hyj.hotelbackend.common.SentinelBlockHandlers;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hyj.hotelbackend.auth.AuthUser;
 import com.hyj.hotelbackend.auth.CurrentUserHolder;
@@ -26,6 +28,11 @@ public class AuthController {
     private JwtUtil jwtUtil;
 
     @PostMapping("/login")
+    @SentinelResource(
+            value = "auth-login",
+            blockHandlerClass = SentinelBlockHandlers.class,
+            blockHandler = "handleLoginBlock"
+    )
     public Map<String, Object> login(@RequestBody LoginRequest req) {
         if (req == null || !StringUtils.hasText(req.getUsername()) || !StringUtils.hasText(req.getPassword())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "账号和密码必填");
@@ -69,6 +76,11 @@ public class AuthController {
     }
 
     @PostMapping("/register")
+    @SentinelResource(
+            value = "auth-register",
+            blockHandlerClass = SentinelBlockHandlers.class,
+            blockHandler = "handleRegisterBlock"
+    )
     public Map<String, Object> register(@RequestBody RegisterRequest req) {
         // 1. 基础非空校验
         if (req == null || !StringUtils.hasText(req.getPassword())) {

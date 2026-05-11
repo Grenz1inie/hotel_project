@@ -9,7 +9,8 @@ import com.hyj.hotelbackend.mapper.VipLevelPolicyMapper;
 import com.hyj.hotelbackend.service.RoomService;
 import com.hyj.hotelbackend.service.VipPricingService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cache.annotation.Cacheable;
+import com.alicp.jetcache.anno.Cached;
+import com.alicp.jetcache.anno.CacheType;
 import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -71,7 +72,7 @@ public class VipPricingServiceImpl implements VipPricingService {
     private VipLevelPolicyMapper vipLevelPolicyMapper;
 
     @Override
-    @Cacheable(value = "vipBaseRates", key = "'all'")
+    @Cached(name = "vipBaseRates.", key = "'all'", cacheType = CacheType.BOTH)
     public Map<Integer, BigDecimal> getBaseVipDiscountRates() {
         Map<Integer, VipLevelPolicy> policies = loadPolicyMap();
         Map<Integer, BigDecimal> result = new LinkedHashMap<>();
@@ -80,7 +81,7 @@ public class VipPricingServiceImpl implements VipPricingService {
     }
 
     @Override
-    @Cacheable(value = "vipLevelNames", key = "'all'")
+    @Cached(name = "vipLevelNames.", key = "'all'", cacheType = CacheType.BOTH)
     public Map<Integer, String> getVipLevelNames() {
         Map<Integer, VipLevelPolicy> policies = loadPolicyMap();
         Map<Integer, String> result = new LinkedHashMap<>();
@@ -89,7 +90,7 @@ public class VipPricingServiceImpl implements VipPricingService {
     }
 
     @Override
-    @Cacheable(value = "vipCheckoutHours", key = "'all'")
+    @Cached(name = "vipCheckoutHours.", key = "'all'", cacheType = CacheType.BOTH)
     public Map<Integer, Integer> getCheckoutBoundaryHours() {
         Map<Integer, VipLevelPolicy> policies = loadPolicyMap();
         Map<Integer, Integer> result = new LinkedHashMap<>();
@@ -147,7 +148,7 @@ public class VipPricingServiceImpl implements VipPricingService {
     }
 
     @Override
-    @Cacheable(value = "vipLevelDescriptors", key = "'all'")
+    @Cached(name = "vipLevelDescriptors.", key = "'all'", cacheType = CacheType.BOTH)
     public List<VipLevelDescriptor> getVipLevelDescriptors() {
         Map<Integer, VipLevelPolicy> policies = loadPolicyMap();
         return policies.values().stream()

@@ -1,5 +1,6 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.hyj.hotelbackend.auth.AuthUser;
 import com.hyj.hotelbackend.auth.CurrentUserHolder;
 import com.hyj.hotelbackend.entity.VacancyStatistics;
@@ -28,6 +29,7 @@ public class VacancyStatisticsController {
      * 手动触发计算指定日期的统计数据
      */
     @PostMapping("/calculate")
+    @SentinelResource("admin-statistics")
     public Map<String, Object> calculateStatistics(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         
@@ -46,6 +48,7 @@ public class VacancyStatisticsController {
      * 批量补录历史数据
      */
     @PostMapping("/batch-calculate")
+    @SentinelResource("admin-statistics")
     public Map<String, Object> batchCalculateStatistics(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
@@ -74,6 +77,7 @@ public class VacancyStatisticsController {
      * 查询统计数据
      */
     @GetMapping
+    @SentinelResource("admin-statistics")
     public List<VacancyStatistics> queryStatistics(
             @RequestParam(required = false) List<Long> roomTypeIds,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
@@ -89,6 +93,7 @@ public class VacancyStatisticsController {
      * 删除指定日期的统计数据
      */
     @DeleteMapping
+    @SentinelResource("admin-statistics")
     public Map<String, Object> deleteStatistics(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         

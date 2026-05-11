@@ -1,5 +1,6 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hyj.hotelbackend.auth.AuthUser;
 import com.hyj.hotelbackend.auth.CurrentUserHolder;
@@ -32,6 +33,7 @@ public class UserProfileController {
     private WalletService walletService;
 
     @GetMapping("/profile")
+    @SentinelResource("user-profile-query")
     public Map<String, Object> profile() {
         AuthUser me = CurrentUserHolder.get();
         if (me == null) {
@@ -45,6 +47,7 @@ public class UserProfileController {
     }
 
     @PostMapping("/check-vip-upgrade")
+    @SentinelResource("user-vip-upgrade")
     public Map<String, Object> checkVipUpgrade() {
         AuthUser me = CurrentUserHolder.get();
         if (me == null) {
@@ -76,6 +79,7 @@ public class UserProfileController {
     }
 
     @PutMapping("/profile")
+    @SentinelResource("user-profile-update")
     public Map<String, Object> update(@RequestBody UpdateProfileRequest request) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null) {

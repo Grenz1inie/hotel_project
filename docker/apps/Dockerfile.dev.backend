@@ -1,0 +1,23 @@
+FROM maven:3.9.9-eclipse-temurin-21
+
+WORKDIR /app
+
+ARG MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public
+
+RUN mkdir -p /root/.m2 \
+	&& printf '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">\n  <mirrors>\n    <mirror>\n      <id>aliyunmaven</id>\n      <name>Aliyun Maven</name>\n      <url>%s</url>\n      <mirrorOf>*</mirrorOf>\n    </mirror>\n  </mirrors>\n</settings>\n' "$MAVEN_MIRROR_URL" > /root/.m2/settings.xml
+
+# 先拷贝依赖文件，进行依赖下载，以便利用 Docker 缓存
+COPY hotel-backend/pom.xml ./pom.xml
+COPY hotel-backend/.mvn ./.mvn
+COPY hotel-backend/mvnw hotel-backend/mvnw.cmd ./
+RUN chmod +x mvnw || true
+RUN --mount=type=cache,target=/root/.m2/repository \
+    ./mvnw -s /root/.m2/settings.xml -T 1C -DskipTests dependency:go-offline
+
+# 因为是开发环境，源代码会通过 docker-compose watch 挂载进来
+# 此处不显式拷贝 src，而是由 docker-compose 的 volumes/watch 提供
+
+EXPOSE 8080
+# 启动时执行 spring-boot:run
+CMD ["./mvnw", "-s", "/root/.m2/settings.xml", "spring-boot:run"]

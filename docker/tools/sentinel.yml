@@ -4,7 +4,7 @@ services:
     image: bladex/sentinel-dashboard:latest
     container_name: hotel-sentinel-dashboard
     ports:
-      - "8858:8080"
+      - "8858:8858"
     environment:
       # 当前使用 Dashboard 内存规则模式：控制台配置直接推送到后端客户端，重启后规则可能丢失。
       - JAVA_OPTS=-Dproject.name=sentinel-dashboard

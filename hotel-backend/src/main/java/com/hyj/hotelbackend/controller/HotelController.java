@@ -1,5 +1,6 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.hyj.hotelbackend.entity.Hotel;
 import com.hyj.hotelbackend.service.HotelService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,7 @@ public class HotelController {
     private HotelService hotelService;
 
     @GetMapping("/primary")
+    @SentinelResource("hotel-query")
     public Hotel primaryHotel() {
         Hotel hotel = hotelService.getPrimaryHotel();
         if (hotel == null) {
@@ -27,6 +29,7 @@ public class HotelController {
     }
 
     @GetMapping("/{id}")
+    @SentinelResource("hotel-query")
     public Hotel getById(@PathVariable Long id) {
         Hotel hotel = hotelService.getById(id);
         if (hotel == null) {

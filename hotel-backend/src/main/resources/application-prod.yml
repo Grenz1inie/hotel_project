@@ -10,9 +10,16 @@ spring:
           - redis-sentinel1:26379
           - redis-sentinel2:26379
           - redis-sentinel3:26379
+
   cloud:
     nacos:
       discovery:
         server-addr: nacos:8848
       config:
         server-addr: nacos:8848
+
+jetcache:
+  remote:
+    default:
+      # 增加 readFrom=REPLICA_PREFERRED 参数启用 JetCache 的读写分离
+      uri: redis-sentinel://redis-sentinel1:26379,redis-sentinel2:26379,redis-sentinel3:26379?sentinelMasterId=mymaster&readFrom=REPLICA_PREFERRED

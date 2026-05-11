@@ -1,0 +1,30 @@
+services:
+  frontend:
+    build:
+      context: ../../
+      dockerfile: docker/apps/Dockerfile.dev.frontend
+    container_name: hotel-frontend
+    environment:
+      - WDS_SOCKET_PORT=0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../../hotel-frontend/src:/frontend/src
+      - ../../hotel-frontend/public:/frontend/public
+      - ../../hotel-frontend/craco.config.js:/frontend/craco.config.js
+      - ../../hotel-frontend/package.json:/frontend/package.json
+      - ../../hotel-frontend/node_modules:/frontend/node_modules
+    x-develop:
+      watch:
+        - path: ../../hotel-frontend/src
+          action: sync
+          target: /frontend/src
+        - path: ../../hotel-frontend/public
+          action: sync
+          target: /frontend/public
+        - path: ../../hotel-frontend/craco.config.js
+          action: sync
+          target: /frontend/craco.config.js
+        - path: ../../hotel-frontend/package.json
+          action: sync
+          target: /frontend/package.json

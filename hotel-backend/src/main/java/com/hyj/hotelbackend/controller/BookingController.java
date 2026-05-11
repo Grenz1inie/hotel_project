@@ -1,10 +1,12 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hyj.hotelbackend.auth.AuthUser;
 import com.hyj.hotelbackend.auth.CurrentUserHolder;
 import com.hyj.hotelbackend.common.PageResponse;
+import com.hyj.hotelbackend.common.SentinelBlockHandlers;
 import com.hyj.hotelbackend.entity.Booking;
 import com.hyj.hotelbackend.entity.Room;
 import com.hyj.hotelbackend.entity.RoomInstance;
@@ -54,6 +56,7 @@ public class BookingController {
 
     // GET /api/users/{userId}/bookings?status=&page=&size=
     @GetMapping("/users/{userId}/bookings")
+    @SentinelResource("booking-query")
     public PageResponse<Booking> userBookings(@PathVariable Long userId,
                                               @RequestParam(defaultValue = "1") long page,
                                               @RequestParam(defaultValue = "10") long size,
@@ -77,6 +80,11 @@ public class BookingController {
 
     // PUT /api/bookings/{id}/cancel
     @PutMapping("/bookings/{id}/cancel")
+    @SentinelResource(
+            value = "booking-cancel",
+            blockHandlerClass = SentinelBlockHandlers.class,
+            blockHandler = "handleBookingCancelBlock"
+    )
     public Booking cancel(@PathVariable Long id) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "未登录");
@@ -106,6 +114,11 @@ public class BookingController {
 
     // PUT /api/bookings/{id}/request-refund - 用户申请退款
     @PutMapping("/bookings/{id}/request-refund")
+    @SentinelResource(
+            value = "booking-refund-request",
+            blockHandlerClass = SentinelBlockHandlers.class,
+            blockHandler = "handleRefundRequestBlock"
+    )
     public Booking requestRefund(@PathVariable Long id, @RequestParam(required = false) String reason) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "未登录");
@@ -141,6 +154,7 @@ public class BookingController {
 
     // PUT /api/bookings/{id}/approve-refund - 管理员批准退款
     @PutMapping("/bookings/{id}/approve-refund")
+    @SentinelResource("admin-booking-ops")
     public Booking approveRefund(@PathVariable Long id) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {
@@ -163,6 +177,7 @@ public class BookingController {
 
     // PUT /api/bookings/{id}/reject-refund - 管理员拒绝退款
     @PutMapping("/bookings/{id}/reject-refund")
+    @SentinelResource("admin-booking-ops")
     public Booking rejectRefund(@PathVariable Long id, @RequestParam(required = false) String reason) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {
@@ -187,6 +202,7 @@ public class BookingController {
 
     // 获取订单详情（本人或管理员）
     @GetMapping("/bookings/{id}")
+    @SentinelResource("booking-query")
     public Booking detail(@PathVariable Long id) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "未登录");
@@ -200,6 +216,7 @@ public class BookingController {
 
     // 管理员分页筛选订单：status、userId、roomId、bookingId、时间段重叠过滤
     @GetMapping("/bookings")
+    @SentinelResource("admin-booking-ops")
     public PageResponse<Booking> adminList(@RequestParam(defaultValue = "1") long page,
                                            @RequestParam(defaultValue = "10") long size,
                                            @RequestParam(required = false) String status,
@@ -256,6 +273,11 @@ public class BookingController {
 
     // 改期（本人或管理员）：校验状态与重叠，重算金额
     @PutMapping("/bookings/{id}/reschedule")
+    @SentinelResource(
+            value = "booking-reschedule",
+            blockHandlerClass = SentinelBlockHandlers.class,
+            blockHandler = "handleRescheduleBlock"
+    )
     public Booking reschedule(@PathVariable Long id,
                               @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
                               @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
@@ -297,6 +319,7 @@ public class BookingController {
 
     // 管理员确认入住（与 /api/rooms/bookings/{id}/confirm 一致）
     @PutMapping("/bookings/{id}/confirm")
+    @SentinelResource("admin-booking-ops")
     public Booking confirmByAdmin(@PathVariable Long id) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {
@@ -314,6 +337,7 @@ public class BookingController {
     }
 
     @PutMapping("/bookings/{id}/checkin")
+    @SentinelResource("admin-booking-ops")
     public Booking checkinByAdmin(@PathVariable Long id) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {
@@ -332,6 +356,7 @@ public class BookingController {
 
     // 管理员退房（与 /api/rooms/bookings/{id}/checkout 一致）
     @PutMapping("/bookings/{id}/checkout")
+    @SentinelResource("admin-booking-ops")
     public Booking checkoutByAdmin(@PathVariable Long id) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {
@@ -350,6 +375,7 @@ public class BookingController {
     }
 
     @PutMapping("/bookings/{id}/reject")
+    @SentinelResource("admin-booking-ops")
     public Booking rejectByAdmin(@PathVariable Long id) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {
@@ -369,6 +395,7 @@ public class BookingController {
     }
 
     @DeleteMapping("/bookings/{id}")
+    @SentinelResource("admin-booking-ops")
     public Booking deleteByAdmin(@PathVariable Long id) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {

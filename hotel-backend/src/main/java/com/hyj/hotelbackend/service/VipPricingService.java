@@ -1,5 +1,6 @@
 package com.hyj.hotelbackend.service;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -22,7 +23,7 @@ public interface VipPricingService {
 
     Map<Long, RoomVipDiscountDescriptor> getRoomDiscountDescriptors();
 
-    record VipLevelDescriptor(Integer level, String name, BigDecimal discountRate, Integer checkoutHour, String description) {}
+    record VipLevelDescriptor(Integer level, String name, BigDecimal discountRate, Integer checkoutHour, String description) implements Serializable {}
 
-    record RoomVipDiscountDescriptor(Long roomTypeId, String roomName, Map<Integer, BigDecimal> discounts) {}
+    record RoomVipDiscountDescriptor(Long roomTypeId, String roomName, Map<Integer, BigDecimal> discounts) implements Serializable {}
 }

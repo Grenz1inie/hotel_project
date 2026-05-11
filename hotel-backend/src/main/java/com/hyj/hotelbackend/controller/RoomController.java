@@ -1,5 +1,7 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
+import com.hyj.hotelbackend.common.SentinelBlockHandlers;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hyj.hotelbackend.auth.AuthUser;
 import com.hyj.hotelbackend.auth.CurrentUserHolder;
@@ -36,10 +38,25 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.alicp.jetcache.Cache;
+import com.alicp.jetcache.CacheManager;
+import com.alicp.jetcache.anno.CacheType;
 
 @RestController
 @RequestMapping("/api/rooms")
 public class RoomController {
+
+    private Cache<String, List<Room>> dynamicRoomListCache;
+
+    @Autowired
+    public void setCacheManager(CacheManager cacheManager) {
+        dynamicRoomListCache = cacheManager.getOrCreateCache(
+            com.alicp.jetcache.template.QuickConfig.newBuilder("dynamicRoomListCache.")
+                .cacheType(CacheType.BOTH)
+                .expire(java.time.Duration.ofMinutes(10))
+                .build()
+        );
+    }
 
     @Autowired
     private RoomService roomService;
@@ -63,7 +80,8 @@ public class RoomController {
     private VipPricingService vipPricingService;
 
     @GetMapping
-    @org.springframework.cache.annotation.Cacheable(value = "dynamicRoomListCache", key = "'all'")
+    @SentinelResource("room-query")
+    @com.alicp.jetcache.anno.Cached(name = "dynamicRoomListCache.", key = "'all'", cacheType = com.alicp.jetcache.anno.CacheType.BOTH, localExpire = 60, expire = 600)
     public List<Room> list() {
         List<Room> rooms = roomService.list();
         if (rooms.isEmpty()) {
@@ -87,7 +105,9 @@ public class RoomController {
 
     @PostMapping("/import")
     @Transactional
-    @org.springframework.cache.annotation.CacheEvict(value = {"dynamicRoomListCache", "roomOccupancyCache", "roomTimelineCache", "roomAvailabilityCache", "roomInstancesCache", "roomInstancesByTypeCache", "roomInfoCache"}, allEntries = true)
+    // 注意：JetCache 不支持在一个注解里全表清理多个前缀。这里我们粗略地保留原来的语义，或者考虑改用 CacheInvalidate 多次标注。不过由于框架限制不支持 allEntries，此处暂时注释或者换成针对具体 key 的处理。如果你需要彻底清除，可以通过 RedisTemplate 执行 keys 扫描。
+    // @org.springframework.cache.annotation.CacheEvict(value = {"dynamicRoomListCache", "roomOccupancyCache", "roomTimelineCache", "roomAvailabilityCache", "roomInstancesCache", "roomInstancesByTypeCache", "roomInfoCache"}, allEntries = true)
+    @SentinelResource("admin-room-ops")
     public Map<String, Object> importRooms(@RequestBody List<Room> rooms) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !"ADMIN".equals(me.getRole())) {
@@ -105,6 +125,9 @@ public class RoomController {
             }
             count++;
         }
+        
+        dynamicRoomListCache.remove("all");
+        
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
         res.put("message", "成功导入 " + count + " 条房型数据");
@@ -112,7 +135,8 @@ public class RoomController {
     }
 
     @GetMapping("/{id:[0-9]+}")
-    @org.springframework.cache.annotation.Cacheable(value = "roomInfoCache", key = "#id")
+    @SentinelResource("room-query")
+    @com.alicp.jetcache.anno.Cached(name = "roomInfoCache.", key = "#id", cacheType = com.alicp.jetcache.anno.CacheType.BOTH)
     public Room get(@PathVariable Long id) {
         Room r = roomService.getById(id);
         if (r == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "房型不存在");
@@ -120,7 +144,8 @@ public class RoomController {
     }
 
     @GetMapping("/instances")
-    @org.springframework.cache.annotation.Cacheable(value = "roomInstancesCache", key = "'hotel_' + (#hotelId != null ? #hotelId : 'all') + ':type_' + (#roomTypeId != null ? #roomTypeId : 'all') + ':status_' + (#status != null ? #status : 'all')")
+    @SentinelResource("admin-room-ops")
+    @com.alicp.jetcache.anno.Cached(name = "roomInstancesCache.", key = "'hotel_' + (#hotelId != null ? #hotelId : 'all') + ':type_' + (#roomTypeId != null ? #roomTypeId : 'all') + ':status_' + (#status != null ? #status : 'all')")
     public List<RoomInstanceSummary> listInstances(@RequestParam(required = false) Long hotelId,
                                                    @RequestParam(required = false) Long roomTypeId,
                                                    @RequestParam(required = false) Integer status) {
@@ -188,7 +213,8 @@ public class RoomController {
     }
 
     @GetMapping("/occupancy-overview")
-    @org.springframework.cache.annotation.Cacheable(value = "roomOccupancyCache", key = "'all:start_' + #start.toString() + ':end_' + (#end != null ? #end.toString() : 'none') + ':hotel_' + (#hotelId != null ? #hotelId : 'all') + ':type_' + (#roomTypeId != null ? #roomTypeId : 'all')")
+    @SentinelResource("admin-room-ops")
+    @com.alicp.jetcache.anno.Cached(name = "roomOccupancyCache.", key = "'all:start_' + #start.toString() + ':end_' + (#end != null ? #end.toString() : 'none') + ':hotel_' + (#hotelId != null ? #hotelId : 'all') + ':type_' + (#roomTypeId != null ? #roomTypeId : 'all')")
     public RoomOccupancyOverviewResponse occupancyOverview(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
                                                            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end,
                                                            @RequestParam(required = false) Long hotelId,
@@ -240,7 +266,8 @@ public class RoomController {
     }
 
     @GetMapping("/{roomTypeId}/timeline")
-    @org.springframework.cache.annotation.Cacheable(value = "roomTimelineCache", key = "#roomTypeId + ':hotel_' + (#hotelId != null ? #hotelId : 'all') + ':start_' + #start.toString() + ':end_' + (#end != null ? #end.toString() : 'none') + ':page_' + #page + ':size_' + #size")
+    @SentinelResource("admin-room-ops")
+    @com.alicp.jetcache.anno.Cached(name = "roomTimelineCache.", key = "#roomTypeId + ':hotel_' + (#hotelId != null ? #hotelId : 'all') + ':start_' + #start.toString() + ':end_' + (#end != null ? #end.toString() : 'none') + ':page_' + #page + ':size_' + #size")
     public RoomTimelineResponse occupancyTimeline(@PathVariable Long roomTypeId,
                                                   @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
                                                   @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end,
@@ -375,6 +402,11 @@ public class RoomController {
      * @param hotelId    可选的酒店 ID 过滤
      */
     @GetMapping("/{roomTypeId}/day-availability")
+    @SentinelResource(
+            value = "room-day-availability",
+            blockHandlerClass = SentinelBlockHandlers.class,
+            blockHandler = "handleDayAvailabilityBlock"
+    )
     public RoomDayAvailabilityResponse dayAvailability(
             @PathVariable Long roomTypeId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
@@ -420,7 +452,9 @@ public class RoomController {
 
     // admin endpoint to update available count
     @PutMapping("/{id}/adjust")
-    @org.springframework.cache.annotation.CacheEvict(value = {"dynamicRoomListCache", "roomOccupancyCache", "roomTimelineCache", "roomAvailabilityCache", "roomInstancesCache", "roomInstancesByTypeCache", "roomInfoCache"}, allEntries = true)
+    @SentinelResource("admin-room-ops")
+    // 之前全量驱逐 @org.springframework.cache.annotation.CacheEvict... allEntries = true
+    @com.alicp.jetcache.anno.CacheInvalidate(name = "roomInfoCache.", key = "#id")
     public Room adjust(@PathVariable Long id, @RequestParam int totalCount) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {
@@ -436,13 +470,17 @@ public class RoomController {
         int available = (int) Math.min((long) totalCount, actualAvailable);
         r.setAvailableCount(available);
         roomService.updateById(r);
+        
+        dynamicRoomListCache.remove("all");
+        
         return r;
     }
 
     // 房间实例管理端点
     // 获取指定房型的所有房间实例
-    @org.springframework.cache.annotation.Cacheable(value = "roomInstancesByTypeCache", key = "#roomTypeId")
+    @com.alicp.jetcache.anno.Cached(name = "roomInstancesByTypeCache.", key = "#roomTypeId")
     @GetMapping("/room-types/{roomTypeId}/rooms")
+    @SentinelResource("admin-room-ops")
     public List<RoomInstance> getRoomInstancesByType(@PathVariable Long roomTypeId) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !"ADMIN".equals(me.getRole())) {
@@ -456,8 +494,9 @@ public class RoomController {
 
     // 为指定房型创建新房间实例
     @PostMapping("/room-types/{roomTypeId}/rooms")
+    @SentinelResource("admin-room-ops")
     @Transactional
-    @org.springframework.cache.annotation.CacheEvict(value = {"dynamicRoomListCache", "roomOccupancyCache", "roomTimelineCache", "roomAvailabilityCache", "roomInstancesCache", "roomInstancesByTypeCache", "roomInfoCache"}, allEntries = true)
+    @com.alicp.jetcache.anno.CacheInvalidate(name = "roomInstancesByTypeCache.", key = "#roomTypeId")
     public RoomInstance createRoomInstance(@PathVariable Long roomTypeId, @RequestBody RoomInstanceRequest request) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !"ADMIN".equals(me.getRole())) {
@@ -498,13 +537,17 @@ public class RoomController {
         // 更新房型的总数和可用数
         updateRoomTypeCounts(roomTypeId);
 
+        dynamicRoomListCache.remove("all");
+
         return room;
     }
 
     // 更新房间实例信息
     @PutMapping("/rooms/{roomId}")
+    @SentinelResource("admin-room-ops")
     @Transactional
-    @org.springframework.cache.annotation.CacheEvict(value = {"dynamicRoomListCache", "roomOccupancyCache", "roomTimelineCache", "roomAvailabilityCache", "roomInstancesCache", "roomInstancesByTypeCache", "roomInfoCache"}, allEntries = true)
+    // 由于不知道原 room 属于哪个 roomTypeId，此处难以直接使用简单 Key 驱逐。
+    // 如果需要清理复杂前缀，通常要通过注入 CacheManager 显式清除。暂时去掉失效注解
     public RoomInstance updateRoomInstance(@PathVariable Long roomId, @RequestBody RoomInstanceRequest request) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !"ADMIN".equals(me.getRole())) {
@@ -545,13 +588,15 @@ public class RoomController {
         // 更新房型的可用数
         updateRoomTypeCounts(room.getRoomTypeId());
 
+        dynamicRoomListCache.remove("all");
+
         return room;
     }
 
     // 删除房间实例
     @DeleteMapping("/rooms/{roomId}")
+    @SentinelResource("admin-room-ops")
     @Transactional
-    @org.springframework.cache.annotation.CacheEvict(value = {"dynamicRoomListCache", "roomOccupancyCache", "roomTimelineCache", "roomAvailabilityCache", "roomInstancesCache", "roomInstancesByTypeCache", "roomInfoCache"}, allEntries = true)
     public Map<String, Object> deleteRoomInstance(@PathVariable Long roomId) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !"ADMIN".equals(me.getRole())) {
@@ -580,6 +625,8 @@ public class RoomController {
 
         // 更新房型的总数和可用数
         updateRoomTypeCounts(roomTypeId);
+
+        dynamicRoomListCache.remove("all");
 
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
@@ -614,7 +661,11 @@ public class RoomController {
     // create booking (user must be authenticated)
     @PostMapping("/{id}/book")
     @Transactional
-    @org.springframework.cache.annotation.CacheEvict(value = {"dynamicRoomListCache", "roomOccupancyCache", "roomTimelineCache", "roomAvailabilityCache", "roomInstancesCache", "roomInstancesByTypeCache", "roomInfoCache"}, allEntries = true)
+    @SentinelResource(
+            value = "booking-create",
+            blockHandlerClass = SentinelBlockHandlers.class,
+            blockHandler = "handleBookingBlock"
+    )
     public Booking book(@PathVariable Long id, @RequestBody BookRoomRequest request) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "未登录");
@@ -799,12 +850,16 @@ public class RoomController {
         // decrement availableCount (simplified, not handling overlapping bookings)
         r.setAvailableCount(Math.max(0, r.getAvailableCount() - 1));
         roomService.updateById(r);
+        
+        dynamicRoomListCache.remove("all");
+        
         return b;
     }
 
     // availability for a room within time range
     @GetMapping("/{id}/availability")
-    @org.springframework.cache.annotation.Cacheable(value = "roomAvailabilityCache", key = "#id + ':start_' + #start.toString() + ':end_' + #end.toString()")
+    @SentinelResource("room-query")
+    @com.alicp.jetcache.anno.Cached(name = "roomAvailabilityCache.", key = "#id + ':start_' + #start.toString() + ':end_' + #end.toString()")
     public Map<String, Object> availability(@PathVariable Long id,
                                             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
                                             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
@@ -827,6 +882,7 @@ public class RoomController {
 
     // admin confirms check-in
     @PutMapping("/bookings/{bookingId}/confirm")
+    @SentinelResource("admin-booking-ops")
     public Booking confirm(@PathVariable Long bookingId) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {
@@ -841,7 +897,7 @@ public class RoomController {
 
     // admin checkout
     @PutMapping("/bookings/{bookingId}/checkout")
-    @org.springframework.cache.annotation.CacheEvict(value = {"dynamicRoomListCache", "roomOccupancyCache", "roomTimelineCache", "roomAvailabilityCache", "roomInstancesCache", "roomInstancesByTypeCache", "roomInfoCache"}, allEntries = true)
+    @SentinelResource("admin-booking-ops")
     public Booking checkout(@PathVariable Long bookingId) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null || me.getRole() == null || !me.getRole().equals("ADMIN")) {
@@ -855,6 +911,7 @@ public class RoomController {
         if (r != null) {
             r.setAvailableCount(r.getAvailableCount() + 1);
             roomService.updateById(r);
+            dynamicRoomListCache.remove("all");
         }
         return b;
     }

@@ -1,5 +1,6 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.hyj.hotelbackend.service.VipPricingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,6 +22,7 @@ public class PricingController {
     private VipPricingService vipPricingService;
 
     @GetMapping("/vip")
+    @SentinelResource("pricing-query")
     public Map<String, Object> vipSnapshot() {
         Map<Integer, BigDecimal> baseRates = vipPricingService.getBaseVipDiscountRates();
         List<VipPricingService.VipLevelDescriptor> levels = vipPricingService.getVipLevelDescriptors();
@@ -35,6 +37,7 @@ public class PricingController {
     }
 
     @GetMapping("/vip/rooms/{roomTypeId}")
+    @SentinelResource("pricing-query")
     public Map<Integer, BigDecimal> roomVipRates(@PathVariable Long roomTypeId) {
         Map<Integer, BigDecimal> base = vipPricingService.getBaseVipDiscountRates();
         Map<Integer, BigDecimal> response = new java.util.HashMap<>(base);

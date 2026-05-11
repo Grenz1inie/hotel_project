@@ -5,6 +5,7 @@ cloudbeaver-data/
 minio/
 oracle-data/
 redis-data/
+maven-repo/
 
 # =========================
 # Dependencies (Node / Java)

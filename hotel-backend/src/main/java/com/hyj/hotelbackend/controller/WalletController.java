@@ -1,7 +1,9 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.hyj.hotelbackend.auth.AuthUser;
 import com.hyj.hotelbackend.auth.CurrentUserHolder;
+import com.hyj.hotelbackend.common.SentinelBlockHandlers;
 import com.hyj.hotelbackend.entity.WalletAccount;
 import com.hyj.hotelbackend.entity.WalletTransaction;
 import com.hyj.hotelbackend.service.WalletService;
@@ -22,6 +24,11 @@ public class WalletController {
     private WalletService walletService;
 
     @GetMapping("/me")
+    @SentinelResource(
+            value = "wallet-query",
+            blockHandlerClass = SentinelBlockHandlers.class,
+            blockHandler = "handleWalletQueryBlock"
+    )
     public Map<String, Object> me(@RequestParam(defaultValue = "10") int limit) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null) {
@@ -38,6 +45,11 @@ public class WalletController {
     }
 
     @PostMapping("/recharge")
+    @SentinelResource(
+            value = "wallet-recharge",
+            blockHandlerClass = SentinelBlockHandlers.class,
+            blockHandler = "handleWalletRechargeBlock"
+    )
     public WalletTransaction recharge(@RequestBody RechargeRequest request) {
         AuthUser me = CurrentUserHolder.get();
         if (me == null) {

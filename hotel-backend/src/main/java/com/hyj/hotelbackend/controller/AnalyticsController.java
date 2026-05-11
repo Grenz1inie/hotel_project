@@ -1,5 +1,6 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.hyj.hotelbackend.auth.AuthUser;
 import com.hyj.hotelbackend.auth.CurrentUserHolder;
 import com.hyj.hotelbackend.dto.analytics.VacancyAnalyticsResponse;
@@ -25,6 +26,7 @@ public class AnalyticsController {
     private final AnalyticsService analyticsService;
 
     @GetMapping("/vacancy")
+    @SentinelResource("admin-analytics")
     public VacancyAnalyticsResponse vacancyAnalytics(@RequestParam(required = false) String roomTypeIds,
                                                       @RequestParam(required = false) String start,
                                                       @RequestParam(required = false) String end,

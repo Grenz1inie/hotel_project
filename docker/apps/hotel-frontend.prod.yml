@@ -2,7 +2,7 @@ services:
   nginx:
     build:
       context: ../../
-      dockerfile: docker/apps/Dockerfile.frontend
+      dockerfile: docker/apps/Dockerfile.prod.frontend
       target: nginx-runtime
     image: hotel-nginx:prod
     container_name: hotel-nginx

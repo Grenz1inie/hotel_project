@@ -1,5 +1,6 @@
 package com.hyj.hotelbackend.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.hyj.hotelbackend.service.ChatService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +16,7 @@ public class ChatController {
     private ChatService chatService;
 
     @PostMapping
+    @SentinelResource("ai-chat")
     public Map<String, String> chat(@RequestBody Map<String, String> payload) {
         String userMessage = payload.get("message");
         String reply = chatService.askDeepseek(userMessage);

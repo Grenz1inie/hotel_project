@@ -1,23 +1,25 @@
 spring:
   datasource:
     # 开发环境：连接映射到宿主机的端口 (localhost)
-    url: jdbc:oracle:thin:@localhost:1521/FREEPDB1
+    url: jdbc:oracle:thin:@hotel-oracle:1521/FREEPDB1
   data:
     redis:
       sentinel:
         master: mymaster
         nodes:
-          - host.docker.internal:26379
-          - host.docker.internal:26380
-          - host.docker.internal:26381
+          - redis-sentinel1:26379
+          - redis-sentinel2:26379
+          - redis-sentinel3:26379
+
   cloud:
     nacos:
       discovery:
-        server-addr: 127.0.0.1:8848
+        server-addr: nacos:8848
       config:
-        server-addr: 127.0.0.1:8848
+        server-addr: nacos:8848
 
-logging:
-  level:
-    "[io.lettuce.core.protocol]": DEBUG
-    "[org.springframework.data.redis]": DEBUG
+jetcache:
+  remote:
+    default:
+      # 增加 readFrom=REPLICA_PREFERRED 参数启用 JetCache 的读写分离
+      uri: redis-sentinel://redis-sentinel1:26379,redis-sentinel2:26379,redis-sentinel3:26379?sentinelMasterId=mymaster&readFrom=REPLICA_PREFERRED
