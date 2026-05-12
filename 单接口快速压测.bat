@@ -5,7 +5,7 @@ setlocal enabledelayedexpansion
 :: ====================== 配置 ======================
 set "URL=http://localhost:80/api/rooms"
 set "CONCURRENT=5"
-set "DELAY_MS=1"
+set "DELAY_MS=0.1"
 set "LOOP_COUNT=5000"
 :: ===================================================
 

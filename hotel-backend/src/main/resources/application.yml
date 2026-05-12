@@ -14,20 +14,19 @@ spring:
     active: dev
   application:
     name: hotel-backend
-  config:
-    import: optional:nacos:application.yml
 
   cloud:
-    nacos:
-      discovery:
-        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
-      config:
-        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
     sentinel:
       transport:
-        dashboard: ${SENTINEL_DASHBOARD_ADDR:hotel-sentinel-dashboard:8858}
+        dashboard: hotel-sentinel-dashboard:8858
         port: 8719
       eager: true
+      datasource:
+        flow:
+          file:
+            file: /opt/config/sentinel-flow-rules.json
+            rule-type: flow
+            data-type: json
 
   datasource:
     driver-class-name: oracle.jdbc.OracleDriver

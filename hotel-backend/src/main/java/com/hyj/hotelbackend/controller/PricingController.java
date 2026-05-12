@@ -42,8 +42,8 @@ public class PricingController {
         Map<Integer, BigDecimal> base = vipPricingService.getBaseVipDiscountRates();
         Map<Integer, BigDecimal> response = new java.util.HashMap<>(base);
         VipPricingService.RoomVipDiscountDescriptor descriptor = vipPricingService.getRoomDiscountDescriptors().get(roomTypeId);
-        if (descriptor != null && descriptor.discounts() != null) {
-            response.putAll(descriptor.discounts());
+        if (descriptor != null && descriptor.getDiscounts() != null) {
+            response.putAll(descriptor.getDiscounts());
         }
         return response;
     }

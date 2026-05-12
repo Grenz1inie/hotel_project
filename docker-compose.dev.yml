@@ -2,7 +2,6 @@ name: hotel_project
 
 include:
   - /docker/apps/nginx.yml
-  - /docker/apps/nacos.yml
   - /docker/apps/hotel-frontend.dev.yml
   - /docker/apps/hotel-backend.dev.yml
   - /docker/infra/oracle.yml

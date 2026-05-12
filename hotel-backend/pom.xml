@@ -94,15 +94,15 @@
 
         <!-- 2) Spring Cloud Alibaba 微服务组件 -->
         <!-- Nacos 服务注册与发现 -->
-        <dependency>
+        <!-- <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
-        </dependency>
+        </dependency> -->
         <!-- Nacos 配置中心 -->
-        <dependency>
+        <!-- <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
-        </dependency>
+        </dependency> -->
         <!-- Sentinel 限流与熔断 -->
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
@@ -112,6 +112,11 @@
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-stream-rocketmq</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.csp</groupId>
+            <artifactId>sentinel-transport-simple-http</artifactId>
+            <!-- 如果使用 Spring Cloud Alibaba，通常不需要手动加版本号 -->
         </dependency>
 
         <!-- 3) 数据访问与持久化 -->
@@ -136,7 +141,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
-        
+
         <!-- JetCache 依赖 -->
         <dependency>
             <groupId>com.alicp.jetcache</groupId>
@@ -150,7 +155,7 @@
             <artifactId>kryo</artifactId>
             <version>4.0.2</version>
         </dependency>
-        
+
         <!-- 连接池配置依赖 (commons-pool2) -->
         <dependency>
             <groupId>org.apache.commons</groupId>

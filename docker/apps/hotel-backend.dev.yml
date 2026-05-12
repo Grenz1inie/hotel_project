@@ -16,16 +16,14 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-hotel-files}
-      NACOS_SERVER_ADDR: nacos:8848
-      SPRING_CLOUD_NACOS_SERVER_ADDR: nacos:8848
+      # NACOS_SERVER_ADDR: nacos:8848
+      # SPRING_CLOUD_NACOS_SERVER_ADDR: nacos:8848
       SENTINEL_DASHBOARD_ADDR: sentinel-dashboard:8858
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
     depends_on:
       oracle:
         condition: service_healthy
       redis-master:
-        condition: service_started
-      nacos:
         condition: service_started
       sentinel-dashboard:
         condition: service_started
@@ -36,6 +34,7 @@ services:
       - ../../hotel-backend/target/classes:/app/target/classes
       - ../../hotel-backend/pom.xml:/app/pom.xml
       - ./maven-repo:/root/.m2/repository
+      # - ../tools/sentinel-flow-rules.json:/opt/config/sentinel-flow-rules.json:ro
     x-develop:
       watch:
         - path: ../../hotel-backend/target/classes
